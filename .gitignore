@@ -1,0 +1,19 @@
+# Build outputs
+build/
+*.o
+*.bin
+*.iso
+
+# Tools (too large for git)
+tools/
+
+# NASM binary
+nasm.exe
+
+# Temporary files
+*.tmp
+*.log
+
+# IDE files
+.vscode/
+.idea/
