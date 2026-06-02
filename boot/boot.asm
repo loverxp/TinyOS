@@ -25,9 +25,13 @@ global start:function (start.end - start)
 start:
     ; The bootloader has loaded us into 32-bit protected mode on a x86 machine.
     ; Interrupts are disabled. Paging is disabled.
+    ; EBX contains the physical address of the Multiboot information structure.
 
     ; Set up the stack.
     mov esp, stack_top
+
+    ; Pass Multiboot info pointer (EBX) to kernel_main
+    push ebx
 
     ; Call the kernel main function.
     extern kernel_main

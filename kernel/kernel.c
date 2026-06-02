@@ -4,6 +4,7 @@
 #include "../include/keyboard.h"
 #include "../include/timer.h"
 #include "../include/shell.h"
+#include "../include/pmm.h"
 
 extern void gdt_init(void);
 
@@ -41,7 +42,7 @@ void on_timer_second(void) {
     vga_set_cursor(save_row, save_col);
 }
 
-void kernel_main(void) {
+void kernel_main(uint32_t multiboot_info_addr) {
     // Initialize serial port (COM1)
     outb(0x3F9, 0x00);
     outb(0x3FB, 0x80);
@@ -61,6 +62,15 @@ void kernel_main(void) {
     vga_writestring("TinyOS v0.1 - Kernel Loaded\n");
     vga_writestring("==========================\n\n");
     serial_string("[OK] VGA\n");
+
+    // Initialize physical memory manager
+    pmm_init(multiboot_info_addr);
+    vga_writestring("[OK] Physical memory: ");
+    vga_write_dec(pmm_get_total_memory_kb() / 1024);
+    vga_writestring(" MB (");
+    vga_write_dec(pmm_get_free_pages());
+    vga_writestring(" free pages)\n");
+    serial_string("[OK] PMM\n");
 
     idt_initialize();
     vga_writestring("[OK] IDT initialized\n");
