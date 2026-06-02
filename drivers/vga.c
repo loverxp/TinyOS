@@ -54,10 +54,10 @@ void vga_clear_screen(enum vga_color bg) {
     vga_column = 0;
 }
 
-// Scroll screen up by one line
+// Scroll screen up by one line (within work area, preserve status line)
 static void vga_scroll(void) {
-    // Move all lines up
-    for (size_t y = 0; y < VGA_HEIGHT - 1; y++) {
+    // Move all lines up (rows 1..23 → rows 0..22)
+    for (size_t y = 0; y < VGA_WORK_HEIGHT - 1; y++) {
         for (size_t x = 0; x < VGA_WIDTH; x++) {
             const size_t src_index = (y + 1) * VGA_WIDTH + x;
             const size_t dst_index = y * VGA_WIDTH + x;
@@ -65,13 +65,13 @@ static void vga_scroll(void) {
         }
     }
     
-    // Clear last line
+    // Clear last work line (row 23)
     for (size_t x = 0; x < VGA_WIDTH; x++) {
-        const size_t index = (VGA_HEIGHT - 1) * VGA_WIDTH + x;
+        const size_t index = (VGA_WORK_HEIGHT - 1) * VGA_WIDTH + x;
         vga_buffer[index] = vga_entry(' ', vga_color);
     }
     
-    vga_row = VGA_HEIGHT - 1;
+    vga_row = VGA_WORK_HEIGHT - 1;
 }
 
 // Update hardware cursor position
@@ -89,7 +89,7 @@ void vga_putchar(char c) {
     if (c == '\n') {
         vga_column = 0;
         vga_row++;
-        if (vga_row >= VGA_HEIGHT) {
+        if (vga_row >= VGA_WORK_HEIGHT) {
             vga_scroll();
         }
     } else if (c == '\t') {
@@ -97,7 +97,7 @@ void vga_putchar(char c) {
         if (vga_column >= VGA_WIDTH) {
             vga_column = 0;
             vga_row++;
-            if (vga_row >= VGA_HEIGHT) {
+            if (vga_row >= VGA_WORK_HEIGHT) {
                 vga_scroll();
             }
         }
@@ -114,7 +114,7 @@ void vga_putchar(char c) {
         if (vga_column >= VGA_WIDTH) {
             vga_column = 0;
             vga_row++;
-            if (vga_row >= VGA_HEIGHT) {
+            if (vga_row >= VGA_WORK_HEIGHT) {
                 vga_scroll();
             }
         }

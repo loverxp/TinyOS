@@ -3,10 +3,9 @@
 #include "../include/interrupts.h"
 #include "../include/keyboard.h"
 #include "../include/timer.h"
+#include "../include/shell.h"
 
 extern void gdt_init(void);
-
-static uint32_t seconds = 0;
 
 static void serial_write(char c) {
     while ((inb(0x3FD) & 0x20) == 0);
@@ -24,33 +23,22 @@ static void serial_hex(uint32_t n) {
     }
 }
 
-// Called every second from timer interrupt
+// Called every second from timer interrupt - update VGA status bar
 void on_timer_second(void) {
-    seconds++;
+    uint32_t ticks = timer_get_ticks();
+    uint32_t secs = ticks / 50;
+
     serial_string("[TIMER] ");
-    serial_hex(seconds);
+    serial_hex(secs);
     serial_string("s\n");
 
-    // Save cursor, update status line, restore cursor
     size_t save_row = vga_get_cursor_row();
     size_t save_col = vga_get_cursor_column();
     vga_set_cursor(VGA_HEIGHT - 1, 0);
-    vga_writestring("Timer: ");
-    vga_write_dec(seconds);
+    vga_writestring("Uptime: ");
+    vga_write_dec(secs);
     vga_writestring("s                                          ");
     vga_set_cursor(save_row, save_col);
-}
-
-// Called on each key press from keyboard interrupt
-void on_keyboard_char(char c) {
-    if (c == '\n') {
-        vga_putchar('\n');
-        vga_writestring("> ");
-    } else if (c == '\b') {
-        vga_putchar('\b');
-    } else if (c >= 32 && c < 127) {
-        vga_putchar(c);
-    }
 }
 
 void kernel_main(void) {
@@ -90,18 +78,21 @@ void kernel_main(void) {
     serial_string("[OK] Timer\n");
 
     keyboard_initialize();
-    keyboard_register_char_callback(on_keyboard_char);
     register_interrupt_handler(33, keyboard_handler);
     pic_unmask_irq(1);
     vga_writestring("[OK] Keyboard initialized\n");
     serial_string("[OK] Keyboard\n");
 
+    shell_init();
+    vga_writestring("[OK] Shell initialized\n");
+    serial_string("[OK] Shell\n");
+
     enable_interrupts();
     vga_writestring("[OK] Interrupts enabled\n\n");
     serial_string("[OK] Interrupts enabled\n");
 
-    vga_writestring("Type something. Press 'E' for exception demo.\n");
-    vga_writestring("> ");
+    vga_writestring("Type 'help' for available commands.\n");
+
     serial_string("Ready, entering main loop...\n");
 
     // Event-driven main loop: just wait for interrupts

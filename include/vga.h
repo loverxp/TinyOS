@@ -6,6 +6,7 @@
 // VGA text mode dimensions
 #define VGA_WIDTH  80
 #define VGA_HEIGHT 25
+#define VGA_WORK_HEIGHT 24  // Last row reserved for status bar
 
 // VGA color codes
 enum vga_color {
