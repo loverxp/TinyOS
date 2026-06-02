@@ -125,6 +125,15 @@ static int vsprintf_internal(char* buf, const char* fmt, __builtin_va_list args)
     return str - buf;
 }
 
+// sprintf: format to string buffer
+int sprintf(char* buf, const char* fmt, ...) {
+    __builtin_va_list args;
+    __builtin_va_start(args, fmt);
+    int ret = vsprintf_internal(buf, fmt, args);
+    __builtin_va_end(args);
+    return ret;
+}
+
 // Print formatted string to VGA
 void printf(const char* fmt, ...) {
     char buf[PRINTF_BUF_SIZE];

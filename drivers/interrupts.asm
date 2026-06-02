@@ -1,7 +1,5 @@
 ; interrupts.asm - Interrupt Service Routines
-; This file contains the assembly stubs for all ISRs and IRQs
 
-; External C handlers
 extern isr_handler
 extern irq_handler
 
@@ -25,13 +23,12 @@ isr%1:
 %endmacro
 
 ; IRQ macro - creates a stub for IRQs
-; %1 = irq number (0-15), %2 = remapped vector (32-47)
 %macro IRQ 2
 global irq%1
 irq%1:
     cli
     push byte 0     ; Dummy error code
-    push byte %2    ; Interrupt number (remapped vector)
+    push byte %2    ; Interrupt number (remapped)
     jmp irq_common_stub
 %endmacro
 
@@ -88,16 +85,16 @@ IRQ 14, 46
 IRQ 15, 47
 
 ; Common ISR stub
-; Stack layout when entering:
-;   [esp+12] int_no
-;   [esp+8]  err_code
-;   [esp+4]  eax (saved ds)
-;   [esp]    pusha regs
+; After pusha (32 bytes) + push eax (4 bytes):
+;   [esp+36] = original esp before pusha
+;   [esp+40] = eflags
+;   [esp+44] = int_no (pushed by ISR stub)
+;   [esp+48] = err_code (pushed by ISR stub)
 isr_common_stub:
-    pusha           ; Push all registers
+    pusha           ; Push all registers (32 bytes)
     
     mov ax, ds
-    push eax        ; Save data segment
+    push eax        ; Save data segment (4 bytes)
     
     mov ax, 0x10    ; Load kernel data segment
     mov ds, ax
@@ -105,11 +102,28 @@ isr_common_stub:
     mov fs, ax
     mov gs, ax
     
-    ; Call C handler with parameters (int_no, err_code)
-    ; Parameters are already on stack from ISR stub
-    push esp        ; Pass pointer to register frame (optional)
+    ; Get int_no and err_code from stack
+    ; Stack layout after pusha and push eax:
+    ; [esp]    = ds (saved)
+    ; [esp+4]  = eax (from pusha)
+    ; [esp+8]  = ecx (from pusha)
+    ; [esp+12] = edx (from pusha)
+    ; [esp+16] = ebx (from pusha)
+    ; [esp+20] = esp (from pusha)
+    ; [esp+24] = ebp (from pusha)
+    ; [esp+28] = esi (from pusha)
+    ; [esp+32] = edi (from pusha)
+    ; [esp+36] = int_no
+    ; [esp+40] = err_code
+    ; [esp+44] = eflags (from CPU)
+    ; [esp+48] = cs (from CPU)
+    ; [esp+52] = eip (from CPU)
+    mov ebx, [esp + 36]   ; int_no
+    mov ecx, [esp + 40]   ; err_code
+    push ecx              ; Push err_code
+    push ebx              ; Push int_no
     call isr_handler
-    add esp, 4      ; Clean up pushed esp
+    add esp, 8            ; Clean up both parameters
     
     pop eax         ; Restore data segment
     mov ds, ax
@@ -123,11 +137,6 @@ isr_common_stub:
     iret            ; Return from interrupt
 
 ; Common IRQ stub
-; Stack layout when entering:
-;   [esp+12] int_no (remapped vector 32-47)
-;   [esp+8]  dummy error code (0)
-;   [esp+4]  eax (saved ds)
-;   [esp]    pusha regs
 irq_common_stub:
     pusha           ; Push all registers
     
@@ -141,15 +150,6 @@ irq_common_stub:
     mov gs, ax
     
     ; Calculate IRQ number from interrupt vector
-    ; int_no is at [esp+44] after pusha (8 regs * 4 bytes) + saved eax
-    ; Actually: pusha = 32 bytes, saved eax = 4 bytes
-    ; So int_no is at [esp+36] relative to current esp
-    ; But we need to access it from the original stack frame
-    
-    ; Easier: the int_no was pushed before pusha
-    ; After pusha (32 bytes) + push eax (4 bytes):
-    ; [esp+36] = int_no, [esp+40] = err_code
-    
     mov ebx, [esp + 36]   ; Get int_no (remapped vector)
     sub ebx, 32           ; Convert to IRQ number (0-15)
     push ebx              ; Pass IRQ number as parameter

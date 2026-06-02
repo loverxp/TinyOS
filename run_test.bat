@@ -1,11 +1,10 @@
 @echo off
 echo ==========================================
-echo    TinyOS - Exception Handler Test
+echo    TinyOS - Exception Test
 echo ==========================================
 echo.
-echo Check BOTH windows:
-echo   - QEMU window (red screen on exception)
-echo   - This window (serial debug output)
+echo This will trigger a division by zero exception.
+echo Check the output below for exception details.
 echo.
 
 "D:\Program Files\qemu\qemu-system-i386.exe" -kernel tinyos.bin -m 32 -serial stdio

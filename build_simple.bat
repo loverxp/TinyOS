@@ -50,21 +50,22 @@ echo Building...
 if not exist build mkdir build
 
 REM Assemble
-%NASM% -f elf32 boot/boot.asm -o build/boot.o
-%NASM% -f elf32 drivers/interrupts.asm -o build/interrupts.o
-%NASM% -f elf32 drivers/gdt.asm -o build/gdt.o
-%NASM% -f elf32 drivers/io.asm -o build/io.o
+%NASM% -f elf32 boot/boot.asm -o build\boot.o
+%NASM% -f elf32 drivers/interrupts.asm -o build\interrupts.o
+%NASM% -f elf32 drivers/gdt.asm -o build\gdt.o
+%NASM% -f elf32 drivers/io.asm -o build\io.o
 
 REM Compile
-%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c kernel/kernel.c -o build/kernel.o
-%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c drivers/vga.c -o build/vga.o
-%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c drivers/keyboard.c -o build/keyboard.o
-%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c drivers/timer.c -o build/timer.o
-%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c drivers/interrupts.c -o build/interrupts_c.o
-%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c lib/string.c -o build/string.o
+%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c kernel/kernel.c -o build\kernel.o
+%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c kernel/except.c -o build\except.o
+%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c drivers/vga.c -o build\vga.o
+%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c drivers/keyboard.c -o build\keyboard.o
+%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c drivers/timer.c -o build\timer.o
+%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c drivers/interrupts.c -o build\interrupts_c.o
+%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c lib/string.c -o build\string.o
 
 REM Link
-%LD% -T linker.ld -nostdlib -o tinyos.bin build/boot.o build/interrupts.o build/gdt.o build/io.o build/kernel.o build/vga.o build/keyboard.o build/timer.o build/interrupts_c.o build/string.o
+%LD% -T linker.ld -nostdlib -o tinyos.bin build\boot.o build\interrupts.o build\gdt.o build\io.o build\kernel.o build\except.o build\vga.o build\keyboard.o build\timer.o build\interrupts_c.o build\string.o
 
 echo.
 echo Build complete!

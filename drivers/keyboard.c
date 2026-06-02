@@ -83,6 +83,15 @@ void keyboard_handler(void) {
                     serial_write(c);
                     serial_string("'\n");
                 }
+                
+                // Press E key to trigger exception demo
+                if (c == 'e') {
+                    serial_string("[DEMO] Triggering int $0 (Division By Zero)...\n");
+                    vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+                    vga_writestring("\n>>> Triggering int 0 (Division By Zero) <<<");
+                    asm volatile("int $0");
+                    vga_writestring("\n>>> Returned from exception, continuing...\n");
+                }
             }
         }
     }

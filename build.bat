@@ -75,54 +75,64 @@ REM Create output directory
 if not exist build mkdir build
 
 REM Assemble boot.asm
-echo [1/7] Assembling boot.asm...
+echo [1/8] Assembling boot.asm...
 nasm -f elf32 boot/boot.asm -o build/boot.o
 if %errorlevel% neq 0 goto error
 
 REM Assemble interrupts.asm
-echo [2/7] Assembling interrupts.asm...
+echo [2/8] Assembling interrupts.asm...
 nasm -f elf32 drivers/interrupts.asm -o build/interrupts.o
 if %errorlevel% neq 0 goto error
 
 REM Assemble gdt.asm
-echo [3/7] Assembling gdt.asm...
+echo [3/8] Assembling gdt.asm...
 nasm -f elf32 drivers/gdt.asm -o build/gdt.o
 if %errorlevel% neq 0 goto error
 
+REM Assemble io.asm
+echo [4/8] Assembling io.asm...
+nasm -f elf32 drivers/io.asm -o build/io.o
+if %errorlevel% neq 0 goto error
+
 REM Compile kernel.c
-echo [4/7] Compiling kernel.c...
+echo [5/11] Compiling kernel.c...
 i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c kernel/kernel.c -o build/kernel.o
 if %errorlevel% neq 0 goto error
 
+REM Compile except.c
+echo [6/11] Compiling except.c...
+i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c kernel/except.c -o build/except.o
+if %errorlevel% neq 0 goto error
+
 REM Compile vga.c
-echo [5/7] Compiling vga.c...
+echo [7/11] Compiling vga.c...
 i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c drivers/vga.c -o build/vga.o
 if %errorlevel% neq 0 goto error
 
 REM Compile keyboard.c
-echo [6/7] Compiling keyboard.c...
+echo [8/11] Compiling keyboard.c...
 i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c drivers/keyboard.c -o build/keyboard.o
 if %errorlevel% neq 0 goto error
 
 REM Compile timer.c
-echo [7/7] Compiling timer.c...
+echo [9/11] Compiling timer.c...
 i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c drivers/timer.c -o build/timer.o
 if %errorlevel% neq 0 goto error
 
 REM Compile interrupts.c
-echo [8/8] Compiling interrupts.c...
+echo [10/11] Compiling interrupts.c...
 i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c drivers/interrupts.c -o build/interrupts_c.o
 if %errorlevel% neq 0 goto error
 
 REM Compile string.c
-echo [9/9] Compiling string.c...
+echo [11/11] Compiling string.c...
 i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c lib/string.c -o build/string.o
 if %errorlevel% neq 0 goto error
 
 REM Link everything
 echo.
 echo Linking kernel...
-i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin build/boot.o build/interrupts.o build/gdt.o build/kernel.o build/vga.o build/keyboard.o build/timer.o build/interrupts_c.o build/string.o
+i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin build/boot.o build/interrupts.o build/gdt.o build/io.o build/kernel.o build/except.o build/vga.o build/keyboard.o build/timer.o build/interrupts_c.o build/string.o
 if %errorlevel% neq 0 goto error
 
 echo.

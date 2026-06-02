@@ -2,6 +2,7 @@
 #include "../include/io.h"
 #include "../include/vga.h"
 #include "../include/string.h"
+#include "../include/except.h"
 
 struct idt_entry {
     uint16_t base_low;
@@ -153,12 +154,7 @@ void pic_send_eoi(uint8_t irq) {
 
 void isr_handler(uint32_t int_no, uint32_t err_code) {
     if (int_no < 32) {
-        vga_set_color(VGA_COLOR_WHITE, VGA_COLOR_RED);
-        vga_clear_screen(VGA_COLOR_RED);
-        vga_writestring("EXCEPTION: ");
-        vga_writestring(exception_messages[int_no]);
-        vga_writestring("\nSystem halted!");
-        asm volatile("cli; hlt");
+        exception_handler(int_no, err_code);
     }
     
     if (isr_handlers[int_no] != 0) {

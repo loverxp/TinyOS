@@ -3,6 +3,9 @@
 
 #include "types.h"
 
+// Format to string buffer
+int sprintf(char* buf, const char* fmt, ...);
+
 // Print formatted string to VGA display
 void printf(const char* fmt, ...);
 
