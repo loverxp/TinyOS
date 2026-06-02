@@ -5,6 +5,7 @@
 #include "../include/timer.h"
 #include "../include/shell.h"
 #include "../include/pmm.h"
+#include "../include/mm.h"
 
 extern void gdt_init(void);
 
@@ -29,16 +30,23 @@ void on_timer_second(void) {
     uint32_t ticks = timer_get_ticks();
     uint32_t secs = ticks / 50;
 
-    serial_string("[TIMER] ");
-    serial_hex(secs);
-    serial_string("s\n");
+    // Get memory stats
+    uint32_t heap_used = kmalloc_get_used();
+    uint32_t heap_total = kmalloc_get_total();
+    uint32_t mem_free = pmm_get_free_pages() * 4;  // in KB
 
     size_t save_row = vga_get_cursor_row();
     size_t save_col = vga_get_cursor_column();
     vga_set_cursor(VGA_HEIGHT - 1, 0);
     vga_writestring("Uptime: ");
     vga_write_dec(secs);
-    vga_writestring("s                                          ");
+    vga_writestring("s  Heap: ");
+    vga_write_dec(heap_used / 1024);
+    vga_writestring("K/");
+    vga_write_dec(heap_total / 1024);
+    vga_writestring("K  Mem: ");
+    vga_write_dec(mem_free / 1024);
+    vga_writestring("M free        ");
     vga_set_cursor(save_row, save_col);
 }
 
@@ -71,6 +79,11 @@ void kernel_main(uint32_t multiboot_info_addr) {
     vga_write_dec(pmm_get_free_pages());
     vga_writestring(" free pages)\n");
     serial_string("[OK] PMM\n");
+
+    // Initialize kernel heap allocator
+    mm_init();
+    vga_writestring("[OK] Kernel heap initialized\n");
+    serial_string("[OK] MM\n");
 
     idt_initialize();
     vga_writestring("[OK] IDT initialized\n");

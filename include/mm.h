@@ -3,14 +3,19 @@
 
 #include "types.h"
 
-// Simple kernel heap allocator
-// NO paging, just a bump allocator from BSS
+// Initialize kernel heap allocator
+void mm_init(void);
 
 // Allocate memory from kernel heap
 void* kmalloc(size_t size);
 
-// Free memory (currently does nothing)
+// Free memory back to kernel heap
 void kfree(void* ptr);
+
+// Get heap statistics
+uint32_t kmalloc_get_used(void);
+uint32_t kmalloc_get_free(void);
+uint32_t kmalloc_get_total(void);
 
 // Test memory allocation
 void mm_test(void);

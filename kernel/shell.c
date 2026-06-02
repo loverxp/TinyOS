@@ -4,6 +4,7 @@
 #include "../include/timer.h"
 #include "../include/string.h"
 #include "../include/pmm.h"
+#include "../include/mm.h"
 
 #define LINE_BUF_SIZE 256
 
@@ -43,6 +44,7 @@ static void shell_handle_command(const char* cmd) {
         vga_writestring("  alloc [N]  - Allocate N pages (default: 1)\n");
         vga_writestring("  free 0xADDR- Free a page by address\n");
         vga_writestring("  except     - Trigger Division By Zero\n");
+        vga_writestring("  kmtest     - Run kmalloc/kfree test\n");
         vga_writestring("  echo <txt> - Echo text\n");
     } else if (strcmp(cmd, "clear") == 0) {
         vga_clear_screen(VGA_COLOR_BLACK);
@@ -115,6 +117,8 @@ static void shell_handle_command(const char* cmd) {
     } else if (strcmp(cmd, "except") == 0) {
         vga_writestring("Triggering Division By Zero...\n");
         asm volatile("int $0");
+    } else if (strcmp(cmd, "kmtest") == 0) {
+        mm_test();
     } else if (strncmp(cmd, "echo ", 5) == 0) {
         const char* text = cmd + 5;
         while (*text == ' ') text++;

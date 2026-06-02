@@ -44,10 +44,6 @@ void keyboard_handler(void) {
     // Read scancode from keyboard
     uint8_t scancode = inb(KEYBOARD_DATA_PORT);
 
-    serial_string("[IRQ1] scancode=0x");
-    serial_hex(scancode);
-    serial_string("\n");
-
     // Check if key release (bit 7 set)
     if (scancode & 0x80) {
         scancode &= 0x7F;
@@ -61,10 +57,6 @@ void keyboard_handler(void) {
         } else if (scancode < sizeof(scancode_to_ascii)) {
             char c = scancode_to_ascii[scancode];
             if (c != 0) {
-                serial_string("[IRQ1] char='");
-                serial_write(c);
-                serial_string("'\n");
-
                 // Event-driven: call callback directly
                 if (char_callback) {
                     char_callback(c);
