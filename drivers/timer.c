@@ -9,6 +9,8 @@
 #define PIT_FREQUENCY 1193182
 
 static volatile uint32_t timer_ticks = 0;
+static uint32_t frequency_hz = 0;
+static timer_second_callback_t second_callback = NULL;
 
 // Simple debug output to serial port
 static void serial_write(char c) {
@@ -27,8 +29,17 @@ static void serial_hex(uint32_t n) {
     }
 }
 
+void timer_register_second_callback(timer_second_callback_t callback) {
+    second_callback = callback;
+}
+
 void timer_handler(void) {
     timer_ticks++;
+
+    // Fire second callback every 'frequency_hz' ticks (1 second)
+    if (second_callback && (timer_ticks % frequency_hz == 0)) {
+        second_callback();
+    }
 }
 
 uint32_t timer_get_ticks(void) {
@@ -37,11 +48,12 @@ uint32_t timer_get_ticks(void) {
 
 void timer_initialize(uint32_t frequency) {
     uint32_t divisor = PIT_FREQUENCY / frequency;
-    
+    frequency_hz = frequency;
+
     outb(PIT_COMMAND_PORT, 0x36);
     outb(PIT_CHANNEL0_PORT, (uint8_t)(divisor & 0xFF));
     outb(PIT_CHANNEL0_PORT, (uint8_t)((divisor >> 8) & 0xFF));
-    
+
     serial_string("[TIMER] Initialized at ");
     serial_hex(frequency);
     serial_string(" Hz\n");

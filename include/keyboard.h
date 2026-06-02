@@ -3,14 +3,11 @@
 
 #include "types.h"
 
-// Check if keyboard has input
-int keyboard_has_input(void);
+// Callback type for character events
+typedef void (*keyboard_char_callback_t)(char);
 
-// Read a character from keyboard buffer (blocking)
-char keyboard_read_char(void);
-
-// Read a character from keyboard buffer (non-blocking)
-char keyboard_try_read(void);
+// Register callback triggered on each key press
+void keyboard_register_char_callback(keyboard_char_callback_t callback);
 
 // Keyboard interrupt handler
 void keyboard_handler(void);

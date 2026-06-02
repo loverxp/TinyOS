@@ -9,8 +9,11 @@ void timer_handler(void);
 // Get current tick count
 uint32_t timer_get_ticks(void);
 
-// Sleep for specified number of milliseconds
-void timer_sleep(uint32_t milliseconds);
+// Callback type for 1-second events
+typedef void (*timer_second_callback_t)(void);
+
+// Register callback triggered every second
+void timer_register_second_callback(timer_second_callback_t callback);
 
 // Initialize timer with specified frequency (Hz)
 void timer_initialize(uint32_t frequency);

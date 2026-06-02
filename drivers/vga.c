@@ -175,3 +175,22 @@ void vga_write_hex(uint32_t num) {
         vga_putchar(buf[--i]);
     }
 }
+
+// Set cursor position
+void vga_set_cursor(size_t row, size_t column) {
+    if (row < VGA_HEIGHT && column < VGA_WIDTH) {
+        vga_row = row;
+        vga_column = column;
+        vga_update_cursor();
+    }
+}
+
+// Get current cursor row
+size_t vga_get_cursor_row(void) {
+    return vga_row;
+}
+
+// Get current cursor column
+size_t vga_get_cursor_column(void) {
+    return vga_column;
+}

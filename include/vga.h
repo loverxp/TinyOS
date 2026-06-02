@@ -51,4 +51,13 @@ void vga_write_dec(uint32_t num);
 // Write a number in hexadecimal
 void vga_write_hex(uint32_t num);
 
+// Set cursor position (row, column)
+void vga_set_cursor(size_t row, size_t column);
+
+// Get current cursor row
+size_t vga_get_cursor_row(void);
+
+// Get current cursor column
+size_t vga_get_cursor_column(void);
+
 #endif // VGA_H

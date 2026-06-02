@@ -6,6 +6,8 @@
 
 extern void gdt_init(void);
 
+static uint32_t seconds = 0;
+
 static void serial_write(char c) {
     while ((inb(0x3FD) & 0x20) == 0);
     outb(0x3F8, c);
@@ -22,7 +24,37 @@ static void serial_hex(uint32_t n) {
     }
 }
 
+// Called every second from timer interrupt
+void on_timer_second(void) {
+    seconds++;
+    serial_string("[TIMER] ");
+    serial_hex(seconds);
+    serial_string("s\n");
+
+    // Save cursor, update status line, restore cursor
+    size_t save_row = vga_get_cursor_row();
+    size_t save_col = vga_get_cursor_column();
+    vga_set_cursor(VGA_HEIGHT - 1, 0);
+    vga_writestring("Timer: ");
+    vga_write_dec(seconds);
+    vga_writestring("s                                          ");
+    vga_set_cursor(save_row, save_col);
+}
+
+// Called on each key press from keyboard interrupt
+void on_keyboard_char(char c) {
+    if (c == '\n') {
+        vga_putchar('\n');
+        vga_writestring("> ");
+    } else if (c == '\b') {
+        vga_putchar('\b');
+    } else if (c >= 32 && c < 127) {
+        vga_putchar(c);
+    }
+}
+
 void kernel_main(void) {
+    // Initialize serial port (COM1)
     outb(0x3F9, 0x00);
     outb(0x3FB, 0x80);
     outb(0x3F8, 0x01);
@@ -51,12 +83,14 @@ void kernel_main(void) {
     serial_string("[OK] PIC\n");
 
     timer_initialize(50);
+    timer_register_second_callback(on_timer_second);
     register_interrupt_handler(32, timer_handler);
     pic_unmask_irq(0);
     vga_writestring("[OK] Timer initialized (50 Hz)\n");
     serial_string("[OK] Timer\n");
 
     keyboard_initialize();
+    keyboard_register_char_callback(on_keyboard_char);
     register_interrupt_handler(33, keyboard_handler);
     pic_unmask_irq(1);
     vga_writestring("[OK] Keyboard initialized\n");
@@ -70,33 +104,8 @@ void kernel_main(void) {
     vga_writestring("> ");
     serial_string("Ready, entering main loop...\n");
 
-    uint32_t last_ticks = 0;
-    uint32_t seconds = 0;
-
+    // Event-driven main loop: just wait for interrupts
     while (1) {
-        uint32_t ticks = timer_get_ticks();
-        if (ticks != last_ticks) {
-            last_ticks = ticks;
-            if (ticks % 50 == 0) {
-                seconds++;
-                serial_string("[TIMER] ");
-                serial_hex(seconds);
-                serial_string("s\n");
-            }
-        }
-
-        if (keyboard_has_input()) {
-            char c = keyboard_read_char();
-            if (c == '\n') {
-                vga_putchar('\n');
-                vga_writestring("> ");
-            } else if (c == '\b') {
-                vga_putchar('\b');
-            } else if (c >= 32 && c < 127) {
-                vga_putchar(c);
-            }
-        }
-
         halt();
     }
 }
