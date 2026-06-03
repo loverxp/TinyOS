@@ -326,6 +326,71 @@ user_main (Ring 3)
 
 ---
 
+## 用户程序加载流程
+
+### 嵌入式用户程序的加载与执行
+
+```
+runuser 命令
+  │
+  └─ run_loaded_user()  [kernel/loader.c]
+       │
+       ├─ 获取 incbin 嵌入的二进制: embedded_user_start ~ embedded_user_end
+       │   └─ 定义于 kernel/embedded_user.asm (使用 incbin 指令)
+       │
+       ├─ memcpy(0x400000, embedded_user_start, size)  ← 复制到目标地址
+       │
+       ├─ pmm_alloc_page()  ← 分配 4KB 用户栈
+       │
+       ├─ user_esp = stack_page + 4096  ← 栈顶（栈向下增长）
+       │
+       └─ run_user_task_ex(entry=0x400000, user_esp)  [kernel/user.asm]
+            │
+            ├─ 保存内核栈指针
+            ├─ 设置用户段寄存器 (DS/ES/FS/GS = 0x23)
+            │
+            └─ 构建 IRET 帧并执行 iret → Ring 3
+                 │
+                 ▼
+               0x400000 (_start, crt0.s)  (Ring 3)
+                 │
+                 ├─ 清理 BSS 段
+                 ├─ 调用 main()
+                 │   └─ (用户程序逻辑，如 hello.c)
+                 └─ 调用 exit() → syscall 0 → 返回内核态
+                       │
+                       ▼
+                 user_exit_handler (Ring 0)
+                       ├─ 恢复内核段寄存器
+                       ├─ 恢复内核栈
+                       ├─ pmm_free_page(user_stack) ← 释放用户栈
+                       └─ ret → 回到 loader.c
+```
+
+### 用户程序构建流程
+
+```
+user/hello.c  +  user/crt0.s
+       │
+       ├─ i686-elf-gcc (编译为 .o)
+       ├─ i686-elf-ld -T user.ld (链接为 ELF)
+       └─ i686-elf-objcopy -O binary (转为纯二进制)
+              │
+              ▼
+       user/programs/hello.bin
+              │
+              ▼ (incbin 嵌入)
+       kernel/embedded_user.asm
+              │
+              ▼ (编译)
+       build/embedded_user_asm.o
+              │
+              ▼ (链接)
+       tinyos.bin
+```
+
+---
+
 ## 主循环流程
 
 ```c
@@ -558,7 +623,7 @@ boot.asm
                     ├─ vga_writestring() [vga.c]
                     └─ user_exit_handler() [user.asm]
 
-用户态切换:
+用户态切换 (testuser):
     kernel.c (test_user_mode)
         └─ run_user_task() [user.asm]
             └─ iret → Ring 3
@@ -567,6 +632,20 @@ boot.asm
                     ├─ hlt → GPF → 捕获并跳过
                     └─ syscall 0 → 返回 Ring 0
                         └─ user_exit_handler → 回到 kernel.c
+
+用户程序加载 (runuser):
+    shell.c (runuser 命令)
+        └─ run_loaded_user() [loader.c]
+            ├─ pmm_alloc_page() [pmm.c]     ← 分配用户栈
+            ├─ memcpy() [string.c]
+            ├─ printf() [stdio.c]            ← 输出加载信息
+            └─ run_user_task_ex() [user.asm] ← 自定义栈入口
+                └─ iret → Ring 3
+                    └─ (USER_PROG_BASE = 0x400000)
+                        └─ _start (crt0.s) → main() → exit()
+                            └─ syscall 0 → 返回内核态
+                                └─ user_exit_handler → loader.c
+                                    └─ pmm_free_page() [pmm.c]
 ```
 
 ---

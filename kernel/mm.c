@@ -2,6 +2,7 @@
 #include "../include/pmm.h"
 #include "../include/vga.h"
 #include "../include/string.h"
+#include "../include/stdio.h"
 
 // Memory allocator using PMM page allocator
 // Block-based allocator with free list coalescing
@@ -246,12 +247,10 @@ uint32_t kmalloc_get_total(void) {
 }
 
 void mm_test(void) {
-    vga_writestring("\n--- kmalloc Test ---\n");
+    printf("\n--- kmalloc Test ---\n");
 
     uint32_t before_free = kmalloc_get_free();
-    vga_writestring("Free before: ");
-    vga_write_dec(before_free);
-    vga_writestring(" bytes\n");
+    printf("Free before: %u bytes\n", before_free);
 
     void* p1 = kmalloc(16);
     void* p2 = kmalloc(32);
@@ -260,57 +259,37 @@ void mm_test(void) {
 
     if (p1) {
         strcpy((char*)p1, "kmalloc works!");  // 15 chars + null, fits in 16 bytes
-        vga_writestring("  p1(16) = 0x");
-        vga_write_hex((uint32_t)p1);
-        vga_writestring(" -> \"");
-        vga_writestring((char*)p1);
-        vga_writestring("\"\n");
+        printf("  p1(16) = 0x%x -> \"%s\"\n", (uint32_t)p1, (char*)p1);
     }
     if (p2) {
         int* arr = (int*)p2;
         arr[0] = 42; arr[1] = 99;
-        vga_writestring("  p2(32) = 0x");
-        vga_write_hex((uint32_t)p2);
-        vga_writestring(", arr[0]=");
-        vga_write_dec(arr[0]);
-        vga_writestring(" arr[1]=");
-        vga_write_dec(arr[1]);
-        vga_putchar('\n');
+        printf("  p2(32) = 0x%x, arr[0]=%u arr[1]=%u\n", (uint32_t)p2, arr[0], arr[1]);
     }
     if (p3) {
-        vga_writestring("  p3(64) = 0x");
-        vga_write_hex((uint32_t)p3);
-        vga_putchar('\n');
+        printf("  p3(64) = 0x%x\n", (uint32_t)p3);
     }
     if (p4) {
-        vga_writestring("  p4(128) = 0x");
-        vga_write_hex((uint32_t)p4);
-        vga_putchar('\n');
+        printf("  p4(128) = 0x%x\n", (uint32_t)p4);
     }
 
     uint32_t after_alloc = kmalloc_get_used();
-    vga_writestring("Used after alloc: ");
-    vga_write_dec(after_alloc);
-    vga_writestring(" bytes\n");
+    printf("Used after alloc: %u bytes\n", after_alloc);
 
     // Free p2 and p3
-    vga_writestring("Freeing p2...\n");
+    printf("Freeing p2...\n");
     kfree(p2);
-    vga_writestring("Freeing p3...\n");
+    printf("Freeing p3...\n");
     kfree(p3);
 
     uint32_t after_free = kmalloc_get_free();
-    vga_writestring("Free after partial free: ");
-    vga_write_dec(after_free);
-    vga_writestring(" bytes\n");
+    printf("Free after partial free: %u bytes\n", after_free);
 
     // Allocate again - should reuse freed space
     void* p5 = kmalloc(48);
     if (p5) {
-        vga_writestring("  p5(48 realloc) = 0x");
-        vga_write_hex((uint32_t)p5);
-        vga_putchar('\n');
+        printf("  p5(48 realloc) = 0x%x\n", (uint32_t)p5);
     }
 
-    vga_writestring("--- kmalloc Test Done ---\n");
+    printf("--- kmalloc Test Done ---\n");
 }

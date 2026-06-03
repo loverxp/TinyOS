@@ -41,6 +41,34 @@ run_user_task:
     iret
 
 ; ------------------------------------------------------------------
+; run_user_task_ex(target_func, user_esp) - Switch to Ring 3 with
+;                                           custom user stack pointer
+; ------------------------------------------------------------------
+global run_user_task_ex
+run_user_task_ex:
+    mov eax, [esp + 4]      ; target user function address
+    mov ecx, [esp + 8]      ; user stack top
+
+    ; Save kernel stack pointer
+    mov [saved_kernel_esp], esp
+
+    ; Set up user data segments
+    mov ebx, 0x23
+    mov ds, bx
+    mov es, bx
+    mov fs, bx
+    mov gs, bx
+
+    ; Build IRET frame with custom stack
+    push 0x23               ; SS  = user data with RPL=3
+    push ecx                ; ESP = provided user stack top
+    pushfd                  ; EFLAGS
+    or  dword [esp], 0x3200 ; Set IF=1 and IOPL=3
+    push 0x1B               ; CS  = user code with RPL=3
+    push eax                ; EIP = user function
+    iret
+
+; ------------------------------------------------------------------
 ; user_exit_handler - Called by syscall 0 to return from Ring 3
 ;                     to kernel mode. Restores kernel stack and returns
 ;                     to the caller of run_user_task.

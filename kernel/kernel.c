@@ -8,6 +8,7 @@
 #include "../include/mm.h"
 #include "../include/gdt.h"
 #include "../include/tss.h"
+#include "../include/stdio.h"
 
 // User mode entry points (from user.asm)
 extern void run_user_task(void (*entry)(void));
@@ -15,9 +16,9 @@ extern void user_main(void);
 
 // Test user mode switching from kernel
 void test_user_mode(void) {
-    vga_writestring("Switching to Ring 3 (user mode)...\n");
+    printf("Switching to Ring 3 (user mode)...\n");
     run_user_task(user_main);
-    vga_writestring("Back in kernel mode! Test passed.\n");
+    printf("Back in kernel mode! Test passed.\n");
 }
 
 static void serial_write(char c) {
@@ -49,15 +50,7 @@ void on_timer_second(void) {
     size_t save_row = vga_get_cursor_row();
     size_t save_col = vga_get_cursor_column();
     vga_set_cursor(VGA_HEIGHT - 1, 0);
-    vga_writestring("Uptime: ");
-    vga_write_dec(secs);
-    vga_writestring("s  Heap: ");
-    vga_write_dec(heap_used / 1024);
-    vga_writestring("K/");
-    vga_write_dec(heap_total / 1024);
-    vga_writestring("K  Mem: ");
-    vga_write_dec(mem_free / 1024);
-    vga_writestring("M free        ");
+    printf("Uptime: %us  Heap: %uK/%uK  Mem: %uM free        ", secs, heap_used / 1024, heap_total / 1024, mem_free / 1024);
     vga_set_cursor(save_row, save_col);
 }
 
@@ -78,61 +71,57 @@ void kernel_main(uint32_t multiboot_info_addr) {
 
     vga_initialize();
     vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    vga_writestring("TinyOS v0.1 - Kernel Loaded\n");
-    vga_writestring("==========================\n\n");
+    printf("TinyOS v0.1 - Kernel Loaded\n");
+    printf("==========================\n\n");
     serial_string("[OK] VGA\n");
 
     // Initialize physical memory manager
     pmm_init(multiboot_info_addr);
-    vga_writestring("[OK] Physical memory: ");
-    vga_write_dec(pmm_get_total_memory_kb() / 1024);
-    vga_writestring(" MB (");
-    vga_write_dec(pmm_get_free_pages());
-    vga_writestring(" free pages)\n");
+    printf("[OK] Physical memory: %u MB (%u free pages)\n", pmm_get_total_memory_kb() / 1024, pmm_get_free_pages());
     serial_string("[OK] PMM\n");
 
     // Initialize kernel heap allocator
     mm_init();
-    vga_writestring("[OK] Kernel heap initialized\n");
+    printf("[OK] Kernel heap initialized\n");
     serial_string("[OK] MM\n");
 
     // Initialize TSS for Ring 3 -> Ring 0 transitions
     // Allocate a dedicated 4KB kernel stack for TSS
     static uint8_t tss_kernel_stack[4096] __attribute__((aligned(16)));
     tss_init((uint32_t)tss_kernel_stack + 4096);
-    vga_writestring("[OK] TSS initialized\n");
+    printf("[OK] TSS initialized\n");
     serial_string("[OK] TSS\n");
 
     idt_initialize();
-    vga_writestring("[OK] IDT initialized\n");
+    printf("[OK] IDT initialized\n");
     serial_string("[OK] IDT\n");
 
     pic_initialize();
-    vga_writestring("[OK] PIC initialized\n");
+    printf("[OK] PIC initialized\n");
     serial_string("[OK] PIC\n");
 
     timer_initialize(50);
     timer_register_second_callback(on_timer_second);
     register_interrupt_handler(32, timer_handler);
     pic_unmask_irq(0);
-    vga_writestring("[OK] Timer initialized (50 Hz)\n");
+    printf("[OK] Timer initialized (50 Hz)\n");
     serial_string("[OK] Timer\n");
 
     keyboard_initialize();
     register_interrupt_handler(33, keyboard_handler);
     pic_unmask_irq(1);
-    vga_writestring("[OK] Keyboard initialized\n");
+    printf("[OK] Keyboard initialized\n");
     serial_string("[OK] Keyboard\n");
 
     shell_init();
-    vga_writestring("[OK] Shell initialized\n");
+    printf("[OK] Shell initialized\n");
     serial_string("[OK] Shell\n");
 
     enable_interrupts();
-    vga_writestring("[OK] Interrupts enabled\n\n");
+    printf("[OK] Interrupts enabled\n\n");
     serial_string("[OK] Interrupts enabled\n");
 
-    vga_writestring("Type 'help' for available commands.\n\n");
+    printf("Type 'help' for available commands.\n\n");
 
     serial_string("Ready, entering main loop...\n");
 

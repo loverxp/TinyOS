@@ -106,9 +106,9 @@ struct page_directory_entry {
 ### 1.3 字符串格式化输出
 **目标**：支持 `printf` 风格格式化
 
-- [ ] `sprintf()` / `printf()` 实现
-- [ ] 支持 `%d`, `%x`, `%s`, `%c`, `%p`
-- [ ] 格式化数字显示（十进制/十六进制）
+- [x] `sprintf()` / `printf()` 实现
+- [x] 支持 `%d`, `%x`, `%s`, `%c`, `%p`
+- [x] 格式化数字显示（十进制/十六进制）
 
 ---
 
@@ -201,17 +201,17 @@ struct vfs_node {
   - 系统调用门 (int 0x80, DPL=3)
   - 用户态异常捕获与指令跳过
 
-- [ ] **用户程序运行时 (crt0)**
+- [x] **用户程序运行时 (crt0)**
   - 编写 `crt0.s` 启动代码：`_start → main → exit`
   - 清理 BSS 段
   - 传递 argc/argv
 
-- [ ] **用户程序链接脚本**
+- [x] **用户程序链接脚本**
   - `user.ld`：定义用户程序内存布局
   - 入口点 `_start`，基址 `0x400000`（4MB）
   - `-ffreestanding -nostdlib` 编译选项
 
-- [ ] **简易二进制加载（第一阶段）**
+- [x] **简易二进制加载（第一阶段）**
   - 用户程序编译为纯二进制 (`objcopy -O binary`)
   - 内核直接加载到固定地址执行
   - 绕过 ELF 解析复杂度，快速验证流程
@@ -231,7 +231,7 @@ struct vfs_node {
 **目标**：命令行解释器
 
 - [x] 命令解析
-- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`
+- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`
 - [ ] 程序执行：`fork` + `exec`
 - [ ] 管道支持：`cmd1 | cmd2`
 

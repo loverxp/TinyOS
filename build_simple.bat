@@ -55,6 +55,7 @@ REM Assemble
 %NASM% -f elf32 drivers/gdt.asm -o build\gdt_asm.o
 %NASM% -f elf32 drivers/io.asm -o build\io.o
 %NASM% -f elf32 kernel/user.asm -o build\user.o
+%NASM% -f elf32 kernel/embedded_user.asm -o build\embedded_user.o
 
 REM Compile
 %GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c kernel/gdt.c -o build\gdt.o
@@ -68,10 +69,12 @@ REM Compile
 %GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c drivers/interrupts.c -o build\interrupts_c.o
 %GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c kernel/pmm.c -o build\pmm.o
 %GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c kernel/mm.c -o build\mm.o
+%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c kernel/loader.c -o build\loader.o
 %GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c lib/string.c -o build\string.o
+%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c lib/stdio.c -o build\stdio.o
 
 REM Link
-%LD% -T linker.ld -nostdlib -o tinyos.bin build\boot.o build\interrupts.o build\gdt_asm.o build\gdt.o build\tss.o build\io.o build\kernel.o build\except.o build\shell.o build\pmm.o build\mm.o build\user.o build\vga.o build\keyboard.o build\timer.o build\interrupts_c.o build\string.o
+%LD% -T linker.ld -nostdlib -o tinyos.bin build\boot.o build\interrupts.o build\gdt_asm.o build\gdt.o build\tss.o build\io.o build\kernel.o build\except.o build\shell.o build\pmm.o build\mm.o build\loader.o build\embedded_user.o build\user.o build\vga.o build\keyboard.o build\timer.o build\interrupts_c.o build\string.o build\stdio.o
 
 echo.
 echo Build complete!

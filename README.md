@@ -50,6 +50,7 @@
 | `except`      | 触发除零异常测试异常处理            |
 | `echo <文本>`   | 回显输入的文本                 |
 | `testuser`    | 切换到 Ring 3（用户态）并返回      |
+| `runuser`     | 加载并执行嵌入式用户程序           |
 
 ## 功能特性
 
@@ -68,6 +69,7 @@
   - ✅ 用户态异常捕获与指令跳过
 - ✅ 物理内存管理（PMM，位图式页帧分配器）
 - ✅ 堆内存分配器（kmalloc/kfree，块式管理）
+- ✅ printf/sprintf 格式化输出（%s, %d, %u, %x, %c, %p）
 - ✅ 交互式 Shell（多命令支持）
 - ✅ 系统调用（int 0x80，支持从用户态返回内核态）
 - ✅ 串口调试输出
@@ -85,7 +87,15 @@ TinyOS/
 │   ├── pmm.c              # 物理内存管理器（位图分配）
 │   ├── mm.c               # 堆内存分配器（kmalloc/kfree）
 │   ├── except.c           # 异常处理
+│   ├── loader.c           # 用户程序加载器
+│   ├── embedded_user.asm  # 嵌入的用户程序二进制
 │   └── user.asm           # 用户态入口和切换逻辑
+├── user/
+│   ├── crt0.s             # 用户程序启动代码
+│   ├── hello.c            # 示例用户程序
+│   ├── user.ld            # 用户程序链接脚本
+│   ├── build.bat          # 用户程序构建脚本
+│   └── programs/          # 编译输出的用户程序
 ├── drivers/
 │   ├── vga.c              # VGA 文本显示（80x25, 状态栏）
 │   ├── keyboard.c         # 键盘驱动（中断驱动）
@@ -94,7 +104,9 @@ TinyOS/
 │   ├── interrupts.asm     # 中断处理中断桩（汇编）
 │   ├── gdt.asm            # GDT 表定义（汇编）
 │   └── io.asm             # I/O 端口操作
-├── lib/string.c           # 字符串处理
+├── lib/
+│   ├── string.c           # 字符串处理
+│   └── stdio.c            # printf/sprintf 格式化输出
 ├── include/               # 头文件
 │   ├── types.h            # 类型定义
 │   ├── vga.h
@@ -109,12 +121,14 @@ TinyOS/
 │   ├── mm.h
 │   ├── io.h
 │   ├── string.h
-│   └── stdio.h
+│   ├── stdio.h
+│   └── loader.h
 ├── tools/                 # 交叉编译器
 ├── nasm.exe               # 汇编器
+├── Makefile               # 增量构建支持
 ├── linker.ld              # 链接器脚本
 ├── tinyos.bin             # 编译后的内核
-├── build_simple.bat       # 构建脚本
+├── build_simple.bat       # 简易构建脚本
 ├── run.bat                # 运行脚本
 ├── AGENTS.md              # AI 助手说明
 ├── ARCHITECTURE.md        # 架构与主流程详解
@@ -227,13 +241,25 @@ run_user_task(user_main)    ← 内核态（Ring 0）
 
 ### 构建命令
 
+使用 Makefile 增量构建（推荐）：
+```bash
+make              # 构建内核和用户程序
+make run          # 构建并运行
+make run-debug    # 构建并运行（串口调试输出）
+make run-serial   # 构建并运行（纯串口模式）
+make clean        # 清理构建产物
+make rebuild      # 清理并重新构建
+```
+
+手动编译命令：
 ```bash
 # 汇编
-nasm -f elf32 boot/boot.asm -o build/boot.o
-nasm -f elf32 drivers/interrupts.asm -o build/interrupts.o
+nasm -f elf32 boot/boot.asm -o build/boot_asm.o
+nasm -f elf32 drivers/interrupts.asm -o build/interrupts_asm.o
 nasm -f elf32 drivers/gdt.asm -o build/gdt_asm.o
-nasm -f elf32 drivers/io.asm -o build/io.o
-nasm -f elf32 kernel/user.asm -o build/user.o
+nasm -f elf32 drivers/io.asm -o build/io_asm.o
+nasm -f elf32 kernel/user.asm -o build/user_asm.o
+nasm -f elf32 kernel/embedded_user.asm -o build/embedded_user_asm.o
 
 # 编译 C 文件
 i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c <file.c> -o <file.o>

@@ -12,19 +12,33 @@
 - **QEMU**: 模拟器，位于 `D:\Program Files\qemu`
 
 ### 构建命令
+
+使用 Makefile 增量构建（推荐）：
+```bash
+make              # 构建内核和用户程序
+make run          # 构建并运行
+make run-debug    # 构建并运行（串口调试输出）
+make run-serial   # 构建并运行（纯串口模式）
+make clean        # 清理构建产物
+make rebuild      # 清理并重新构建
+make user-programs # 仅编译用户程序
+```
+
+手动编译命令：
 ```bash
 # 汇编
-nasm -f elf32 boot/boot.asm -o build/boot.o
-nasm -f elf32 drivers/interrupts.asm -o build/interrupts.o
+nasm -f elf32 boot/boot.asm -o build/boot_asm.o
+nasm -f elf32 drivers/interrupts.asm -o build/interrupts_asm.o
 nasm -f elf32 drivers/gdt.asm -o build/gdt_asm.o
-nasm -f elf32 drivers/io.asm -o build/io.o
-nasm -f elf32 kernel/user.asm -o build/user.o
+nasm -f elf32 drivers/io.asm -o build/io_asm.o
+nasm -f elf32 kernel/user.asm -o build/user_asm.o
+nasm -f elf32 kernel/embedded_user.asm -o build/embedded_user_asm.o
 
 # 编译 C 文件
 i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c <file.c> -o <file.o>
 
 # 链接
-i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin build/boot.o build/interrupts.o build/gdt_asm.o build/gdt.o build/tss.o build/io.o build/kernel.o build/except.o build/shell.o build/pmm.o build/mm.o build/user.o build/vga.o build/keyboard.o build/timer.o build/interrupts_c.o build/string.o
+i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin build/boot_asm.o build/interrupts_asm.o build/gdt_asm.o build/gdt.o build/tss.o build/io_asm.o build/kernel.o build/except.o build/shell.o build/pmm.o build/mm.o build/user_asm.o build/vga.o build/keyboard.o build/timer.o build/interrupts_c.o build/string.o build/stdio.o build/loader.o build/embedded_user_asm.o
 ```
 
 ### 运行
@@ -34,9 +48,10 @@ i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin build/boot.o build/interrupts.o
 
 ## 项目结构
 - `boot/`: 启动代码
-- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, mm.c, except.c, user.asm）
+- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, mm.c, except.c, loader.c, embedded_user.asm, user.asm）
+- `user/`: 用户程序（crt0.s, hello.c, user.ld, build.bat）
 - `drivers/`: 设备驱动（VGA、键盘、定时器、中断、GDT、I/O）
-- `lib/`: 库函数（字符串处理）
+- `lib/`: 库函数（字符串处理、printf/sprintf 格式化输出）
 - `include/`: 头文件
 - `tools/`: 交叉编译工具链（已下载到本地）
 
@@ -46,10 +61,13 @@ i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin build/boot.o build/interrupts.o
 - `kernel/kernel.c`: 内核主函数
 - `drivers/gdt.asm` / `kernel/gdt.c`: GDT 定义与初始化
 - `kernel/tss.c`: TSS 初始化，管理 Ring 3→Ring 0 栈切换
-- `kernel/user.asm`: 用户态入口、Ring 3 切换及退出
+- `kernel/user.asm`: 用户态入口、Ring 3 切换及退出（含自定义栈版本 `run_user_task_ex`）
+- `kernel/loader.c`: 用户程序加载器，拷贝二进制到 0x400000，分配栈，执行
+- `kernel/embedded_user.asm`: 使用 `incbin` 嵌入用户程序二进制
 - `drivers/interrupts.c` / `drivers/interrupts.asm`: 中断处理
 - `kernel/pmm.c`: 物理内存管理器（位图分配）
 - `kernel/mm.c`: 堆内存分配器（kmalloc/kfree）
+- `lib/stdio.c`: printf/sprintf 格式化输出实现
 
 ## 内存布局
 - 内核加载地址: 0x100000 (1MB)

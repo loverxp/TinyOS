@@ -1,0 +1,9 @@
+; embedded_user.asm - Embed user program binary into kernel
+; This file is auto-generated - the binary must exist before kernel build
+
+global embedded_user_start, embedded_user_end
+
+section .rodata
+embedded_user_start:
+    incbin "user/programs/hello.bin"
+embedded_user_end:

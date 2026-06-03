@@ -1,81 +1,107 @@
 # TinyOS Makefile
-# Builds a simple operating system that can run on QEMU
+# Supports incremental builds and user program building.
 
-# Compiler and tools
-CC = i686-elf-gcc
-AS = nasm
-LD = i686-elf-ld
-
-# QEMU path
+# Tools (use full paths since they're not on PATH on Windows)
+CC   = tools/bin/i686-elf-gcc.exe
+AS   = nasm.exe
+LD   = tools/i686-elf-ld.exe
+ifeq (,$(wildcard $(LD)))
+LD   = tools/bin/i686-elf-ld.exe
+endif
 QEMU = "D:/Program Files/qemu/qemu-system-i386.exe"
 
-# Compiler flags
-CFLAGS = -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector \
-         -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude
+# User program tools
+USER_CC = $(CC)
+USER_AS = $(AS)
+USER_LD = $(LD)
+USER_OBJCOPY = tools/i686-elf-objcopy.exe
+ifeq (,$(wildcard $(USER_OBJCOPY)))
+USER_OBJCOPY = tools/bin/i686-elf-objcopy.exe
+endif
 
-# Assembler flags
-ASFLAGS = -f elf32
+# Flags
+CFLAGS   = -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions \
+           -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude
+ASFLAGS  = -f elf32
+LDFLAGS  = -T linker.ld -nostdlib
 
-# Linker flags
-LDFLAGS = -T linker.ld -nostdlib
+# Build output directory
+BUILD = build
 
 # Source files
-C_SOURCES = $(wildcard kernel/*.c) $(wildcard drivers/*.c) $(wildcard lib/*.c)
-ASM_SOURCES = $(wildcard boot/*.asm) $(wildcard drivers/*.asm)
+C_SRCS    = kernel/kernel.c kernel/shell.c kernel/except.c kernel/gdt.c \
+            kernel/tss.c kernel/pmm.c kernel/mm.c kernel/loader.c \
+            drivers/vga.c drivers/keyboard.c drivers/timer.c drivers/interrupts.c \
+            lib/string.c lib/stdio.c
+ASM_SRCS  = boot/boot.asm drivers/interrupts.asm drivers/gdt.asm \
+            drivers/io.asm kernel/user.asm kernel/embedded_user.asm
 
-# Object files
-C_OBJECTS = $(C_SOURCES:.c=.o)
-ASM_OBJECTS = $(ASM_SOURCES:.asm=.o)
+# Object files (all in build/; .asm -> _asm.o to avoid name collision with .c)
+C_OBJS    = $(patsubst %.c,$(BUILD)/%.o,$(notdir $(C_SRCS)))
+ASM_OBJS  = $(patsubst %.asm,$(BUILD)/%_asm.o,$(notdir $(ASM_SRCS)))
+OBJECTS   = $(ASM_OBJS) $(C_OBJS)
 
-# All object files
-OBJECTS = $(ASM_OBJECTS) $(C_OBJECTS)
+# User program files
+USER_BIN  = user/programs/hello.bin
 
 # Target
-TARGET = tinyos.bin
-ISO = tinyos.iso
+TARGET    = tinyos.bin
 
-# Default target
-all: $(TARGET)
+.PHONY: all user-programs run run-debug run-serial clean rebuild
 
-# Build the kernel binary
-$(TARGET): $(OBJECTS)
-	$(LD) $(LDFLAGS) -o $@ $^
+# Default target: build user programs first, then kernel
+all: user-programs $(TARGET)
 
-# Compile C files
-%.o: %.c
-	$(CC) $(CFLAGS) -c -o $@ $<
+# Build user programs
+user-programs:
+	cd user && .\build.bat
 
-# Assemble assembly files
-%.o: %.asm
+# Link
+$(TARGET): $(OBJECTS) | $(BUILD)
+	$(LD) $(LDFLAGS) -o $@ $(OBJECTS)
+
+# embedded_user.asm depends on user binary
+$(BUILD)/embedded_user_asm.o: kernel/embedded_user.asm $(USER_BIN) | $(BUILD)
 	$(AS) $(ASFLAGS) -o $@ $<
 
-# Create ISO image (optional, for CD boot)
-iso: $(TARGET)
-	mkdir -p iso/boot/grub
-	cp $(TARGET) iso/boot/
-	echo 'menuentry "TinyOS" {' > iso/boot/grub/grub.cfg
-	echo '    multiboot /boot/$(TARGET)' >> iso/boot/grub/grub.cfg
-	echo '}' >> iso/boot/grub/grub.cfg
-	grub-mkrescue -o $(ISO) iso
+# Compile C files: map e.g. kernel/kernel.c -> build/kernel.o
+$(BUILD)/%.o: kernel/%.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-# Run in QEMU
+$(BUILD)/%.o: drivers/%.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/%.o: lib/%.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# Assemble ASM files: map e.g. boot/boot.asm -> build/boot_asm.o
+$(BUILD)/%_asm.o: boot/%.asm | $(BUILD)
+	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD)/%_asm.o: drivers/%.asm | $(BUILD)
+	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD)/%_asm.o: kernel/%.asm | $(BUILD)
+	$(AS) $(ASFLAGS) -o $@ $<
+
+# Ensure build directory exists
+$(BUILD):
+	mkdir -p $(BUILD)
+
+# Run
 run: $(TARGET)
 	$(QEMU) -kernel $(TARGET) -m 32
 
-# Run in QEMU with serial output
 run-debug: $(TARGET)
 	$(QEMU) -kernel $(TARGET) -m 32 -serial stdio
 
-# Run in QEMU with no graphic (serial only)
 run-serial: $(TARGET)
 	$(QEMU) -kernel $(TARGET) -m 32 -nographic
 
-# Clean build files
+# Clean (Windows-compatible)
 clean:
-	rm -f $(OBJECTS) $(TARGET) $(ISO)
-	rm -rf iso
+	-if exist $(BUILD) rmdir /S /Q $(BUILD)
+	-if exist $(TARGET) del /F $(TARGET)
+	-if exist $(USER_BIN) del /F $(USER_BIN)
 
-# Rebuild
 rebuild: clean all
-
-.PHONY: all iso run run-debug run-serial clean rebuild

@@ -1,6 +1,7 @@
 #include "../include/except.h"
 #include "../include/vga.h"
 #include "../include/io.h"
+#include "../include/stdio.h"
 
 void exception_handler(uint32_t int_no, uint32_t err_code) {
     static const char* names[] = {
@@ -15,18 +16,10 @@ void exception_handler(uint32_t int_no, uint32_t err_code) {
     };
 
     vga_set_color(VGA_COLOR_RED, VGA_COLOR_BLACK);
-    vga_writestring("\n*** EXCEPTION: ");
-    if (int_no < 32) {
-        vga_writestring(names[int_no]);
-    } else {
-        vga_write_dec(int_no);
-    }
-    vga_writestring(" ***\n");
-    vga_writestring("    Error Code: ");
-    vga_write_hex(err_code);
-    vga_writestring("\n");
+    printf("\n*** EXCEPTION: %s ***\n", int_no < 32 ? names[int_no] : "Unknown");
+    printf("    Error Code: 0x%x\n", err_code);
     vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    vga_writestring("    System continues...\n");
+    printf("    System continues...\n");
 }
 
 void exceptions_init(void) {
