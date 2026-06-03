@@ -1,7 +1,7 @@
 # Build outputs
 build/
+logs/
 *.o
-*.bin
 *.iso
 
 # Tools (too large for git)

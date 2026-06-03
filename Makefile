@@ -30,7 +30,7 @@ BUILD = build
 
 # Source files
 C_SRCS    = kernel/kernel.c kernel/shell.c kernel/except.c kernel/gdt.c \
-            kernel/tss.c kernel/pmm.c kernel/mm.c kernel/loader.c \
+            kernel/tss.c kernel/pmm.c kernel/paging.c kernel/mm.c kernel/loader.c \
             drivers/vga.c drivers/keyboard.c drivers/timer.c drivers/interrupts.c \
             lib/string.c lib/stdio.c
 ASM_SRCS  = boot/boot.asm drivers/interrupts.asm drivers/gdt.asm \
@@ -42,10 +42,10 @@ ASM_OBJS  = $(patsubst %.asm,$(BUILD)/%_asm.o,$(notdir $(ASM_SRCS)))
 OBJECTS   = $(ASM_OBJS) $(C_OBJS)
 
 # User program files
-USER_BIN  = user/programs/hello.bin
+USER_BIN  = build/user/hello.bin
 
 # Target
-TARGET    = tinyos.bin
+TARGET    = $(BUILD)/tinyos.bin
 
 .PHONY: all user-programs run run-debug run-serial clean rebuild
 
@@ -86,22 +86,25 @@ $(BUILD)/%_asm.o: kernel/%.asm | $(BUILD)
 
 # Ensure build directory exists
 $(BUILD):
-	mkdir -p $(BUILD)
+	@-mkdir $(BUILD) 2>nul
 
 # Run
 run: $(TARGET)
 	$(QEMU) -kernel $(TARGET) -m 32
 
-run-debug: $(TARGET)
-	$(QEMU) -kernel $(TARGET) -m 32 -serial stdio
+run-debug: $(TARGET) | logs
+	$(QEMU) -kernel $(TARGET) -m 32 -serial file:logs/serial.log
 
 run-serial: $(TARGET)
 	$(QEMU) -kernel $(TARGET) -m 32 -nographic
 
+# Ensure logs directory exists
+logs:
+	@-mkdir logs 2>nul
+
 # Clean (Windows-compatible)
 clean:
 	-if exist $(BUILD) rmdir /S /Q $(BUILD)
-	-if exist $(TARGET) del /F $(TARGET)
-	-if exist $(USER_BIN) del /F $(USER_BIN)
+	-if exist logs rmdir /S /Q logs
 
 rebuild: clean all

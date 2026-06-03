@@ -8,6 +8,7 @@
 #include "../include/mm.h"
 #include "../include/gdt.h"
 #include "../include/tss.h"
+#include "../include/paging.h"
 #include "../include/stdio.h"
 
 // User mode entry points (from user.asm)
@@ -84,6 +85,10 @@ void kernel_main(uint32_t multiboot_info_addr) {
     mm_init();
     printf("[OK] Kernel heap initialized\n");
     serial_string("[OK] MM\n");
+
+    // Initialize paging (identity map first 8MB)
+    paging_init();
+    serial_string("[OK] Paging\n");
 
     // Initialize TSS for Ring 3 -> Ring 0 transitions
     // Allocate a dedicated 4KB kernel stack for TSS

@@ -286,10 +286,38 @@ i686-elf-objdump -d tinyos.bin | grep -A 20 "<irq_common_stub>:"
 
 ### 4. QEMU 调试选项
 ```bash
-qemu-system-i386 -kernel tinyos.bin -d int,cpu_reset
+qemu-system-i386 -kernel build/tinyos.bin -d int,cpu_reset
 ```
 
-### 5. 检查异常错误码
+### 5. 分页调试
+启用分页后异常向量 14 (Page Fault) 会显示 CR2 寄存器值（出错的虚拟地址），帮助定位页表映射问题。
+
+### 6. 检查异常错误码
 异常错误码包含段选择子信息，可用于排查用户态特权级相关问题：
 - 错误码 `0x00`：非段相关违规（如特权指令）
 - 错误码 `0x18`：GDT[3] 段选择子（即用户代码段），通常表示缺少 RPL=3
+
+---
+
+## 问题11：启用分页后用户态程序无法运行
+
+### 现象
+启用分页后 `runuser` 命令执行用户程序时崩溃或无响应。
+
+### 原因
+页表未正确映射用户程序地址 `0x400000`。分页初始化时只 identity map 了前 8MB 物理内存，如果页表覆盖范围不足，用户程序地址无法访问。
+
+### 解决
+确保页表 identity map 覆盖用户程序地址：
+```c
+// 映射 0~8MB（包含 0x400000）
+for (int t = 0; t < 2; t++) {  // 2 个页表 = 8MB
+    page_tables[t] = (page_table_entry_t*)pmm_alloc_page();
+    uint32_t base = t * 0x400000;
+    for (int i = 0; i < PT_ENTRIES; i++) {
+        // 设置 present=1, rw=1, user=1
+        // 物理地址 = base + i * 4096
+    }
+    // 设置页目录项
+}
+```

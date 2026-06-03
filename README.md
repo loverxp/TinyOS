@@ -6,17 +6,17 @@
 
 ### 1. 直接运行（已编译好）
 
-双击 **`run.bat`** 即可启动 QEMU 运行操作系统。
+双击 **`scripts\run.bat`** 即可启动 QEMU 运行操作系统。
 
 ### 2. 重新构建并运行
 
-双击 **`build_simple.bat`** 会自动编译并启动。
+双击 **`scripts\build_simple.bat`** 或运行 `make` 会自动编译并启动。
 
 ## 键盘输入使用说明
 
 **重要：必须先在 QEMU 窗口内点击一下，才能接收键盘输入！**
 
-1. 双击 `run.bat` 启动 QEMU
+1. 双击 `scripts\run.bat` 启动 QEMU
 2. 看到蓝色界面的 TinyOS 启动后，**用鼠标点击一下 QEMU 窗口内部**
 3. 此时光标应该闪烁，直接打字即可
 4. **Enter** 换行，**Backspace** 删除
@@ -31,7 +31,7 @@
 3. 检查是否开启了中文输入法（建议切换到英文输入法）
 4. 尝试在命令行手动运行：
    ```batch
-   "D:\Program Files\qemu\qemu-system-i386.exe" -kernel tinyos.bin -m 32
+   "D:\Program Files\qemu\qemu-system-i386.exe" -kernel build\tinyos.bin -m 32
    ```
 
 ## Shell 命令
@@ -51,6 +51,7 @@
 | `echo <文本>`   | 回显输入的文本                 |
 | `testuser`    | 切换到 Ring 3（用户态）并返回      |
 | `runuser`     | 加载并执行嵌入式用户程序           |
+| `pageinfo`    | 显示页表信息                    |
 
 ## 功能特性
 
@@ -68,6 +69,7 @@
   - ✅ 异常处理（除零、GPF 等）
   - ✅ 用户态异常捕获与指令跳过
 - ✅ 物理内存管理（PMM，位图式页帧分配器）
+- ✅ 分页机制（页目录/页表，identity map 前 8MB）
 - ✅ 堆内存分配器（kmalloc/kfree，块式管理）
 - ✅ printf/sprintf 格式化输出（%s, %d, %u, %x, %c, %p）
 - ✅ 交互式 Shell（多命令支持）
@@ -86,7 +88,8 @@ TinyOS/
 │   ├── tss.c              # TSS 初始化
 │   ├── pmm.c              # 物理内存管理器（位图分配）
 │   ├── mm.c               # 堆内存分配器（kmalloc/kfree）
-│   ├── except.c           # 异常处理
+│   ├── paging.c           # 分页机制（页目录/页表）
+│   ├── except.c           # 异常处理（含 Page Fault 详细诊断）
 │   ├── loader.c           # 用户程序加载器
 │   ├── embedded_user.asm  # 嵌入的用户程序二进制
 │   └── user.asm           # 用户态入口和切换逻辑
@@ -95,7 +98,7 @@ TinyOS/
 │   ├── hello.c            # 示例用户程序
 │   ├── user.ld            # 用户程序链接脚本
 │   ├── build.bat          # 用户程序构建脚本
-│   └── programs/          # 编译输出的用户程序
+│   └── programs/          # 编译输出的用户程序（移入 build/user/）
 ├── drivers/
 │   ├── vga.c              # VGA 文本显示（80x25, 状态栏）
 │   ├── keyboard.c         # 键盘驱动（中断驱动）
@@ -118,22 +121,31 @@ TinyOS/
 │   ├── gdt.h
 │   ├── tss.h
 │   ├── pmm.h
+│   ├── paging.h
 │   ├── mm.h
 │   ├── io.h
 │   ├── string.h
 │   ├── stdio.h
 │   └── loader.h
 ├── tools/                 # 交叉编译器
+├── scripts/               # 构建与运行脚本
+│   ├── run.bat            # 运行 TinyOS
+│   ├── run_debug.bat      # 串口调试模式运行
+│   ├── run_test.bat       # 异常演示模式运行
+│   ├── build.bat          # 全量构建脚本
+│   ├── build_simple.bat   # 简易构建脚本
+│   ├── test_build.sh      # Linux 构建脚本
+│   └── test_qemu.sh       # Linux QEMU 运行脚本
+├── docs/                  # 文档
+│   ├── ARCHITECTURE.md    # 架构与主流程详解
+│   ├── ROADMAP.md         # 演化路线图
+│   └── TROUBLESHOOTING.md # 问题排查记录
+├── build/                 # 编译产物（.o 目标文件、tinyos.bin、user 程序）
+├── logs/                  # 串口调试日志
 ├── nasm.exe               # 汇编器
-├── Makefile               # 增量构建支持
+├── Makefile               # 增量构建（推荐）
 ├── linker.ld              # 链接器脚本
-├── tinyos.bin             # 编译后的内核
-├── build_simple.bat       # 简易构建脚本
-├── run.bat                # 运行脚本
 ├── AGENTS.md              # AI 助手说明
-├── ARCHITECTURE.md        # 架构与主流程详解
-├── ROADMAP.md             # 演化路线图
-├── TROUBLESHOOTING.md     # 问题排查记录
 └── README.md              # 本文件
 ```
 
@@ -161,14 +173,15 @@ kernel_main()
   3. VGA 初始化（清屏、光标重置）
   4. PMM 初始化（从 GRUB 获取内存映射）
   5. MM 初始化（基于 PMM 的堆分配器）
-  6. TSS 初始化（分配内核栈，供 Ring 3→Ring 0 使用）
-  7. IDT 初始化（异常 + IRQ + 系统调用门）
-  8. PIC 初始化（重映射，全部屏蔽）
-  9. 定时器初始化（注册 handler，unmask IRQ0）
-  10. 键盘初始化（注册 handler，unmask IRQ1）
-  11. Shell 初始化（注册键盘回调）
-  12. 启用中断（sti）
-  13. 事件驱动主循环（halt）
+  6. 分页初始化（identity map 前 8MB）
+  7. TSS 初始化（分配内核栈，供 Ring 3→Ring 0 使用）
+  8. IDT 初始化（异常 + IRQ + 系统调用门）
+  9. PIC 初始化（重映射，全部屏蔽）
+  10. 定时器初始化（注册 handler，unmask IRQ0）
+  11. 键盘初始化（注册 handler，unmask IRQ1）
+  12. Shell 初始化（注册键盘回调）
+  13. 启用中断（sti）
+  14. 事件驱动主循环（halt）
 ```
 
 ### 用户态切换流程

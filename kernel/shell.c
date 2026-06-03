@@ -7,6 +7,7 @@
 #include "../include/mm.h"
 #include "../include/stdio.h"
 #include "../include/loader.h"
+#include "../include/paging.h"
 
 #define LINE_BUF_SIZE 256
 
@@ -50,6 +51,7 @@ static void shell_handle_command(const char* cmd) {
             printf("  echo <txt> - Echo text\n");
             printf("  testuser   - Switch to Ring 3 and return\n");
             printf("  runuser    - Load and run external user program\n");
+            printf("  pageinfo   - Show page table info\n");
     } else if (strcmp(cmd, "clear") == 0) {
         vga_clear_screen(VGA_COLOR_BLACK);
         vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
@@ -107,6 +109,8 @@ static void shell_handle_command(const char* cmd) {
         const char* text = cmd + 5;
         while (*text == ' ') text++;
         printf("%s\n", text);
+    } else if (strcmp(cmd, "pageinfo") == 0) {
+        paging_dump_info();
     } else if (strcmp(cmd, "runuser") == 0) {
         run_loaded_user();
     } else if (strcmp(cmd, "testuser") == 0) {

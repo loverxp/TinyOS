@@ -5,5 +5,5 @@ global embedded_user_start, embedded_user_end
 
 section .rodata
 embedded_user_start:
-    incbin "user/programs/hello.bin"
+    incbin "build/user/hello.bin"
 embedded_user_end:

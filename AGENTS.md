@@ -38,12 +38,11 @@ nasm -f elf32 kernel/embedded_user.asm -o build/embedded_user_asm.o
 i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c <file.c> -o <file.o>
 
 # 链接
-i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin build/boot_asm.o build/interrupts_asm.o build/gdt_asm.o build/gdt.o build/tss.o build/io_asm.o build/kernel.o build/except.o build/shell.o build/pmm.o build/mm.o build/user_asm.o build/vga.o build/keyboard.o build/timer.o build/interrupts_c.o build/string.o build/stdio.o build/loader.o build/embedded_user_asm.o
-```
+i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/interrupts_asm.o build/gdt_asm.o build/gdt.o build/tss.o build/io_asm.o build/kernel.o build/except.o build/shell.o build/pmm.o build/mm.o build/user_asm.o build/vga.o build/keyboard.o build/timer.o build/interrupts_c.o build/string.o build/stdio.o build/loader.o build/embedded_user_asm.o
 
 ### 运行
 ```batch
-"D:\Program Files\qemu\qemu-system-i386.exe" -kernel tinyos.bin -m 32
+"D:\Program Files\qemu\qemu-system-i386.exe" -kernel build/tinyos.bin -m 32
 ```
 
 ## 项目结构

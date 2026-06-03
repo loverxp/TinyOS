@@ -68,7 +68,14 @@ kernel_main()
 │       └─> 从 PMM 分配内存作为堆空间
 │       └─> 初始化块式分配器
 │
-├─> 6. 初始化 TSS
+├─> 6. 初始化分页
+│   └─> paging_init()
+│       └─> 分配页目录和 2 个页表
+│       └─> Identity map 前 8MB 物理内存
+│       └─> 设置 CR3 = 页目录基址
+│       └─> 设置 CR0.PG 启用分页
+│
+├─> 7. 初始化 TSS
 │   └─> tss_init(kernel_stack_top)
 │       └─> 设置 ESP0 为专用内核栈顶
 │       └─> 加载 TSS 到 GDT
@@ -129,15 +136,16 @@ kernel_main()
 ├─ [3] VGA 初始化          屏幕显示
 ├─ [4] PMM 初始化 ────────── 物理内存页帧分配
 ├─ [5] MM 初始化  ────────── kmalloc/kfree 堆分配器
-├─ [6] TSS 初始化 ────────── Ring 3→Ring 0 栈切换
-├─ [7] IDT 初始化 ────────── 中断/异常/系统调用
-├─ [8] PIC 初始化          中断控制器
-├─ [9] 定时器初始化         IRQ0, 50Hz
-├─[10] 键盘初始化           IRQ1
-├─[11] Shell 初始化         键盘回调绑定
-├─[12] 启用中断             sti
+├─ [6] 分页初始化 ────────── 页目录/页表, identity map 前 8MB
+├─ [7] TSS 初始化 ────────── Ring 3→Ring 0 栈切换
+├─ [8] IDT 初始化 ────────── 中断/异常/系统调用
+├─ [9] PIC 初始化          中断控制器
+├─[10] 定时器初始化         IRQ0, 50Hz
+├─[11] 键盘初始化           IRQ1
+├─[12] Shell 初始化         键盘回调绑定
+├─[13] 启用中断             sti
 │
-└─[13] 主循环              halt() 等待中断
+└─[14] 主循环              halt() 等待中断
 ```
 
 ---
@@ -377,7 +385,7 @@ user/hello.c  +  user/crt0.s
        └─ i686-elf-objcopy -O binary (转为纯二进制)
               │
               ▼
-       user/programs/hello.bin
+       build/user/hello.bin
               │
               ▼ (incbin 嵌入)
        kernel/embedded_user.asm
@@ -492,6 +500,7 @@ struct tss_entry {
 ```
 0x00000000 ┌──────────────────────┐
            │  中断向量表 (实模式)   │
+           │  + 页目录 + 页表       │  ← 分页用 (占用 ~12KB)
 0x00000400 │  BIOS 数据区          │
 0x00007C00 │  引导扇区             │
 0x0009FC00 │  640KB 常规内存上限    │
@@ -508,10 +517,13 @@ struct tss_entry {
            │  .bss (未初始化数据)   │
 0x00108000 ├──────────────────────┤  ← 栈顶 (1MB + 32KB)
            │                      │
-           │  PMM 管理区域         │
-           │  (物理内存页帧)       │
+           │  Identity Map 区域    │
+           │  (0~8MB 物理内存      │
+           │   映射到相同虚拟地址)  │
            │                      │
-0x02000000 └──────────────────────┘  ← 假设 32MB 内存上限
+           │  用户程序 0x400000    │  ← 加载用户程序
+           │                      │
+0x00800000 └──────────────────────┘  ← 8MB identity map 上限
 ```
 
 ---
@@ -579,6 +591,9 @@ boot.asm
         │   └─> 使用 GRUB 内存映射
         │
         ├─> mm_init()           [mm.c]
+        │   └─> pmm_alloc_page() [pmm.c]
+        │
+        ├─> paging_init()       [paging.c]
         │   └─> pmm_alloc_page() [pmm.c]
         │
         ├─> tss_init()          [tss.c]
@@ -679,7 +694,7 @@ static void serial_write(char c) {
 
 ### 3. 寄存器查看
 
-使用 QEMU 调试：`qemu-system-i386 -kernel tinyos.bin -d int,cpu_reset`
+使用 QEMU 调试：`qemu-system-i386 -kernel build/tinyos.bin -d int,cpu_reset`
 
 ### 4. 异常错误码解析
 

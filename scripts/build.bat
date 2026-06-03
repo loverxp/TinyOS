@@ -1,5 +1,6 @@
 @echo off
 chcp 65001 >nul
+cd /d "%~dp0.."
 setlocal EnableDelayedExpansion
 
 echo ==========================================
@@ -132,7 +133,7 @@ if %errorlevel% neq 0 goto error
 REM Link everything
 echo.
 echo Linking kernel...
-i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin build/boot.o build/interrupts.o build/gdt.o build/io.o build/kernel.o build/except.o build/vga.o build/keyboard.o build/timer.o build/interrupts_c.o build/string.o
+i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot.o build/interrupts.o build/gdt.o build/io.o build/kernel.o build/except.o build/vga.o build/keyboard.o build/timer.o build/interrupts_c.o build/string.o
 if %errorlevel% neq 0 goto error
 
 echo.
@@ -143,7 +144,7 @@ echo.
 
 REM Check if multiboot header is valid
 echo Checking multiboot header...
-for /f "delims=" %%a in ('"%QEMU_PATH%\qemu-system-i386.exe" -kernel tinyos.bin -m 32 -display none -device isa-debug-exit,iobase=0xf4,iosize=0x04 2^>^&1') do (
+for /f "delims=" %%a in ('"%QEMU_PATH%\qemu-system-i386.exe" -kernel build\tinyos.bin -m 32 -display none -device isa-debug-exit,iobase=0xf4,iosize=0x04 2^>^&1') do (
     echo %%a | findstr /C:"multiboot" >nul && (
         echo [WARNING] Multiboot error detected
     )
@@ -152,7 +153,7 @@ for /f "delims=" %%a in ('"%QEMU_PATH%\qemu-system-i386.exe" -kernel tinyos.bin 
 echo.
 echo Starting QEMU...
 echo.
-"%QEMU_PATH%\qemu-system-i386.exe" -kernel tinyos.bin -m 32
+"%QEMU_PATH%\qemu-system-i386.exe" -kernel build\tinyos.bin -m 32
 
 goto end
 
