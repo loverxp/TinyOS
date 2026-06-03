@@ -177,6 +177,93 @@ exit /b 1
 
 ---
 
+## 问题7：用户态实现 - GPF 错误码 0x18
+
+### 现象
+切换到用户态后界面不停打印错误。
+
+### 原因
+用户代码段选择子缺少 RPL=3，导致特权级切换失败。
+- 错误码 `0x18` = 用户代码段选择子索引（GDT[3] = 0x18），但缺少 RPL 位
+- 正确的选择子应为 `0x1B`（0x18 | 3，即 RPL=3）
+
+### 解决
+修正段选择子，确保所有用户态段寄存器设置 RPL=3：
+```nasm
+; 错误
+push 0x18    ; CS = 用户代码段，RPL=0
+push 0x20    ; SS = 用户数据段，RPL=0
+
+; 修复
+push 0x1B    ; CS = 用户代码段 | RPL=3
+push 0x23    ; SS = 用户数据段 | RPL=3
+```
+
+---
+
+## 问题8：用户态无法输入
+
+### 现象
+切换到用户态后键盘无法输入。
+
+### 原因
+1. 用户态 `EFLAGS.IF=0` 禁用了中断
+2. IRQ 的 IDT 门描述符 DPL=0，不允许用户态接收中断
+
+### 解决
+1. 在 IRET 帧中设置 `EFLAGS.IF=1`（0x3200）
+2. 将 IRQ 的 IDT 门描述符 DPL 改为 3（flags = 0xEE）
+```c
+// 0xEE = present, DPL=3, interrupt gate (32-bit)
+idt_set_gate(32, (uint32_t)irq0, 0x08, 0xEE);
+```
+
+---
+
+## 问题9：用户态无法返回内核态
+
+### 现象
+用户态程序执行完毕无法回到内核 Shell。
+
+### 原因
+缺少从用户态（Ring 3）返回内核态（Ring 0）的机制。
+
+### 解决
+实现 `syscall 0`，通过修改中断栈帧实现返回：
+1. 在 `syscall_handler` 中将 EIP 改为 `user_exit_handler`
+2. 将 CS 改为内核代码段（0x08，RPL=0）
+3. 执行 IRET 时 CPU 检测到同级特权级切换（CS.RPL=0 == CPL=0），仅弹出 EIP、CS、EFLAGS
+4. `user_exit_handler` 恢复内核数据段和内核栈指针，`ret` 返回调用者
+
+```c
+void syscall_handler(uint32_t* regs) {
+    if (syscall_no == 0) {
+        regs[11] = (uint32_t)user_exit_handler;  // EIP
+        regs[12] = 0x08;                          // CS = 内核代码段 (RPL=0)
+        return;
+    }
+}
+```
+
+---
+
+## 问题10：TSS 栈溢出导致数据破坏
+
+### 现象
+进入用户态后系统行为异常，包括状态栏数据显示错误、Shell 命令执行异常等。
+
+### 原因
+TSS.ESP0 指向 `kernel_main` 当前栈帧内部。当用户态触发中断时，CPU 自动切换到 TSS.ESP0 指定的内核栈，覆盖了正在使用的栈空间。
+
+### 解决
+为 TSS 分配专用 4KB 内核栈，不共享当前内核栈：
+```c
+static uint8_t tss_kernel_stack[4096] __attribute__((aligned(16)));
+tss_init((uint32_t)tss_kernel_stack + 4096);
+```
+
+---
+
 ## 调试技巧总结
 
 ### 1. 串口调试
@@ -201,3 +288,8 @@ i686-elf-objdump -d tinyos.bin | grep -A 20 "<irq_common_stub>:"
 ```bash
 qemu-system-i386 -kernel tinyos.bin -d int,cpu_reset
 ```
+
+### 5. 检查异常错误码
+异常错误码包含段选择子信息，可用于排查用户态特权级相关问题：
+- 错误码 `0x00`：非段相关违规（如特权指令）
+- 错误码 `0x18`：GDT[3] 段选择子（即用户代码段），通常表示缺少 RPL=3

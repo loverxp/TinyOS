@@ -16,14 +16,15 @@
 # 汇编
 nasm -f elf32 boot/boot.asm -o build/boot.o
 nasm -f elf32 drivers/interrupts.asm -o build/interrupts.o
-nasm -f elf32 drivers/gdt.asm -o build/gdt.o
+nasm -f elf32 drivers/gdt.asm -o build/gdt_asm.o
 nasm -f elf32 drivers/io.asm -o build/io.o
+nasm -f elf32 kernel/user.asm -o build/user.o
 
 # 编译 C 文件
 i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c <file.c> -o <file.o>
 
 # 链接
-i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin <所有 .o 文件>
+i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin build/boot.o build/interrupts.o build/gdt_asm.o build/gdt.o build/tss.o build/io.o build/kernel.o build/except.o build/shell.o build/pmm.o build/mm.o build/user.o build/vga.o build/keyboard.o build/timer.o build/interrupts_c.o build/string.o
 ```
 
 ### 运行
@@ -33,8 +34,8 @@ i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin <所有 .o 文件>
 
 ## 项目结构
 - `boot/`: 启动代码
-- `kernel/`: 内核主程序
-- `drivers/`: 设备驱动（VGA、键盘、定时器、中断）
+- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, mm.c, except.c, user.asm）
+- `drivers/`: 设备驱动（VGA、键盘、定时器、中断、GDT、I/O）
 - `lib/`: 库函数（字符串处理）
 - `include/`: 头文件
 - `tools/`: 交叉编译工具链（已下载到本地）
@@ -43,14 +44,35 @@ i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin <所有 .o 文件>
 - `boot/boot.asm`: Multiboot 引导头，内核入口点
 - `linker.ld`: 链接器脚本，定义内存布局
 - `kernel/kernel.c`: 内核主函数
+- `drivers/gdt.asm` / `kernel/gdt.c`: GDT 定义与初始化
+- `kernel/tss.c`: TSS 初始化，管理 Ring 3→Ring 0 栈切换
+- `kernel/user.asm`: 用户态入口、Ring 3 切换及退出
+- `drivers/interrupts.c` / `drivers/interrupts.asm`: 中断处理
+- `kernel/pmm.c`: 物理内存管理器（位图分配）
+- `kernel/mm.c`: 堆内存分配器（kmalloc/kfree）
 
 ## 内存布局
 - 内核加载地址: 0x100000 (1MB)
 - 栈顶: 0x108000
 - VGA 缓冲区: 0xB8000
 
+## GDT 布局
+| 选择子 | 段 | DPL |
+|--------|-----|-----|
+| 0x00 | Null 段 | - |
+| 0x08 | 内核代码段 | Ring 0 |
+| 0x10 | 内核数据段 | Ring 0 |
+| 0x18 | 用户代码段 | Ring 3 |
+| 0x20 | 用户数据段 | Ring 3 |
+| 0x28 | TSS 段 | Ring 0 |
+
+用户态使用选择子时需设置 RPL=3：CS=0x1B(0x18|3), DS/SS=0x23(0x20|3)
+
 ## 注意事项
 - 使用 `-fno-stack-protector` 避免需要 libssp
 - 使用 `-nostdlib -nostdinc` 不使用标准库
 - 使用 `-fno-pic -fno-pie` 生成位置相关代码
 - Multiboot 魔数: 0x1BADB002
+- TSS 需要专用内核栈（非当前内核栈），避免中断时栈溢出
+- IRQ 的 IDT 门描述符 DPL 设为 3 (0xEE) 以允许用户态接收中断
+- 系统调用门 (int 0x80) DPL 设为 3 (0xEE) 以允许用户态触发

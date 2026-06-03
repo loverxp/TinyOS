@@ -19,10 +19,14 @@ void pic_send_eoi(uint8_t irq);
 void register_interrupt_handler(uint8_t n, void (*handler)(void));
 
 // Common ISR handler
-void isr_handler(uint32_t int_no, uint32_t err_code);
+// regs points to the saved register frame: regs[11]=EIP, regs[12]=CS, regs[13]=EFLAGS
+void isr_handler(uint32_t int_no, uint32_t err_code, uint32_t* regs);
 
 // Common IRQ handler
 void irq_handler(uint32_t irq_no);
+
+// Syscall handler (int 0x80)
+void syscall_handler(uint32_t* regs);
 
 // Load IDT (assembly function)
 struct idt_ptr;

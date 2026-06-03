@@ -22,7 +22,7 @@ void exception_handler(uint32_t int_no, uint32_t err_code) {
         vga_write_dec(int_no);
     }
     vga_writestring(" ***\n");
-    vga_writestring("    Error Code: 0x");
+    vga_writestring("    Error Code: ");
     vga_write_hex(err_code);
     vga_writestring("\n");
     vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);

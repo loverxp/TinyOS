@@ -35,6 +35,8 @@ extern void irq4(void);  extern void irq5(void);  extern void irq6(void);  exter
 extern void irq8(void);  extern void irq9(void);  extern void irq10(void); extern void irq11(void);
 extern void irq12(void); extern void irq13(void); extern void irq14(void); extern void irq15(void);
 
+extern void isr128(void); // Syscall interrupt (int 0x80)
+
 void (*isr_handlers[IDT_ENTRIES])(void);
 
 static const char* exception_messages[] = {
@@ -96,15 +98,19 @@ void idt_initialize(void) {
     idt_set_gate(28, (uint32_t)isr28, 0x08, 0x8E); idt_set_gate(29, (uint32_t)isr29, 0x08, 0x8E);
     idt_set_gate(30, (uint32_t)isr30, 0x08, 0x8E); idt_set_gate(31, (uint32_t)isr31, 0x08, 0x8E);
     
-    idt_set_gate(32, (uint32_t)irq0, 0x08, 0x8E);  idt_set_gate(33, (uint32_t)irq1, 0x08, 0x8E);
-    idt_set_gate(34, (uint32_t)irq2, 0x08, 0x8E);  idt_set_gate(35, (uint32_t)irq3, 0x08, 0x8E);
-    idt_set_gate(36, (uint32_t)irq4, 0x08, 0x8E);  idt_set_gate(37, (uint32_t)irq5, 0x08, 0x8E);
-    idt_set_gate(38, (uint32_t)irq6, 0x08, 0x8E);  idt_set_gate(39, (uint32_t)irq7, 0x08, 0x8E);
-    idt_set_gate(40, (uint32_t)irq8, 0x08, 0x8E);  idt_set_gate(41, (uint32_t)irq9, 0x08, 0x8E);
-    idt_set_gate(42, (uint32_t)irq10, 0x08, 0x8E); idt_set_gate(43, (uint32_t)irq11, 0x08, 0x8E);
-    idt_set_gate(44, (uint32_t)irq12, 0x08, 0x8E); idt_set_gate(45, (uint32_t)irq13, 0x08, 0x8E);
-    idt_set_gate(46, (uint32_t)irq14, 0x08, 0x8E); idt_set_gate(47, (uint32_t)irq15, 0x08, 0x8E);
-    
+    // IRQ handlers - DPL=3 so they can fire from user mode (Ring 3)
+    idt_set_gate(32, (uint32_t)irq0, 0x08, 0xEE);  idt_set_gate(33, (uint32_t)irq1, 0x08, 0xEE);
+    idt_set_gate(34, (uint32_t)irq2, 0x08, 0xEE);  idt_set_gate(35, (uint32_t)irq3, 0x08, 0xEE);
+    idt_set_gate(36, (uint32_t)irq4, 0x08, 0xEE);  idt_set_gate(37, (uint32_t)irq5, 0x08, 0xEE);
+    idt_set_gate(38, (uint32_t)irq6, 0x08, 0xEE);  idt_set_gate(39, (uint32_t)irq7, 0x08, 0xEE);
+    idt_set_gate(40, (uint32_t)irq8, 0x08, 0xEE);  idt_set_gate(41, (uint32_t)irq9, 0x08, 0xEE);
+    idt_set_gate(42, (uint32_t)irq10, 0x08, 0xEE); idt_set_gate(43, (uint32_t)irq11, 0x08, 0xEE);
+    idt_set_gate(44, (uint32_t)irq12, 0x08, 0xEE); idt_set_gate(45, (uint32_t)irq13, 0x08, 0xEE);
+    idt_set_gate(46, (uint32_t)irq14, 0x08, 0xEE); idt_set_gate(47, (uint32_t)irq15, 0x08, 0xEE);
+
+    // Syscall interrupt - DPL=3 so user mode can trigger it (0xEE = present, ring 3, interrupt gate)
+    idt_set_gate(128, (uint32_t)isr128, 0x08, 0xEE);
+
     idt_load(&idtp);
 }
 
@@ -152,11 +158,21 @@ void pic_send_eoi(uint8_t irq) {
     outb(0x20, 0x20);
 }
 
-void isr_handler(uint32_t int_no, uint32_t err_code) {
+void isr_handler(uint32_t int_no, uint32_t err_code, uint32_t* regs) {
     if (int_no < 32) {
         exception_handler(int_no, err_code);
+
+        // Handle user-mode General Protection Fault - skip the faulting instruction
+        if (int_no == 13 && (regs[12] & 0x03) == 3) {
+            // regs[12] = CS, RPL=3 means we came from user mode
+            // Skip the faulting instruction (hlt is 1 byte: 0xF4)
+            regs[11] += 1;  // Increment EIP past the hlt
+            vga_set_color(VGA_COLOR_RED, VGA_COLOR_BLACK);
+            vga_writestring("    Skipped faulty instruction\n");
+            vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+        }
     }
-    
+
     if (isr_handlers[int_no] != 0) {
         isr_handlers[int_no]();
     }
@@ -172,4 +188,30 @@ void irq_handler(uint32_t irq_no) {
 
 void register_interrupt_handler(uint8_t n, void (*handler)(void)) {
     isr_handlers[n] = handler;
+}
+
+// Syscall handler (int 0x80)
+// regs[0]=ds, [1]=edi, [2]=esi, [3]=ebp, [4]=esp, [5]=ebx, [6]=edx, [7]=ecx, [8]=eax(syno), [9]=int_no, [10]=err_code
+// IRET frame at regs[11]=EIP, [12]=CS, [13]=EFLAGS, [14]=ESP, [15]=SS
+
+extern void user_exit_handler(void);
+
+void syscall_handler(uint32_t* regs) {
+    uint32_t syscall_no = regs[8];  // EAX contains syscall number
+
+    if (syscall_no == 0) {
+        // Syscall 0: exit user mode, return to kernel
+        vga_writestring("\n*** Return to kernel mode ***\n\n");
+
+        // Modify the saved IRET frame to return to kernel code
+        // Same-privilege IRET (CS.RPL=0 == CPL=0) will pop EIP, CS, EFLAGS
+        regs[11] = (uint32_t)user_exit_handler;  // EIP
+        regs[12] = 0x08;                          // CS = kernel code (RPL=0)
+        return;
+    }
+
+    // Syscall 1: write message
+    vga_writestring("[Syscall] #");
+    vga_write_dec(syscall_no);
+    vga_writestring(" from user mode\n");
 }

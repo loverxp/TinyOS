@@ -3,10 +3,10 @@
 ## 系统启动流程
 
 ```
-+-------------+     +-------------+     +-------------+     +-------------+
-|  QEMU/GRUB  | --> |  boot.asm   | --> |  kernel.c   | --> |  Main Loop  |
-|  (Bootloader)|     | (Multiboot) |     | kernel_main |     |  (Running)  |
-+-------------+     +-------------+     +-------------+     +-------------+
++-------------+     +-------------+     +-------------+     +-----------------+
+|  QEMU/GRUB  | --> |  boot.asm   | --> | kernel_main | --> |  事件驱动主循环  |
+|  (Bootloader)|    | (Multiboot) |     |   初始化...   |     |  halt 等待中断  |
++-------------+     +-------------+     +-------------+     +-----------------+
 ```
 
 ### 第一阶段：引导加载 (boot/boot.asm)
@@ -42,51 +42,109 @@ start:
 ```
 kernel_main()
 │
-├─> 1. 初始化串口 (用于调试输出)
+├─> 1. 初始化串口 (COM1, 用于调试输出)
 │
-├─> 2. 初始化 VGA 显示
+├─> 2. 初始化 GDT
+│   └─> gdt_init()
+│       └─> 设置 6 个描述符：
+│           ├─> Null 段 (GDT[0])
+│           ├─> 内核代码段 (GDT[1], DPL=0)
+│           ├─> 内核数据段 (GDT[2], DPL=0)
+│           ├─> 用户代码段 (GDT[3], DPL=3)
+│           ├─> 用户数据段 (GDT[4], DPL=3)
+│           └─> TSS 段 (GDT[5], DPL=0)
+│
+├─> 3. 初始化 VGA 显示
 │   └─> vga_initialize()
 │       └─> 清屏、设置颜色、重置光标
 │
-├─> 3. 初始化中断描述符表 (IDT)
-│   └─> idt_initialize()
-│       └─> 设置 256 个中断门
-│           ├─> ISR 0-31: CPU 异常处理
-│           └─> IRQ 0-15: 硬件中断 (映射到向量 32-47)
+├─> 4. 初始化物理内存管理器 (PMM)
+│   └─> pmm_init(multiboot_info_addr)
+│       └─> 从 GRUB 获取内存映射
+│       └─> 初始化位图，标记已用/空闲页
 │
-├─> 4. 初始化可编程中断控制器 (PIC)
+├─> 5. 初始化堆分配器 (MM)
+│   └─> mm_init()
+│       └─> 从 PMM 分配内存作为堆空间
+│       └─> 初始化块式分配器
+│
+├─> 6. 初始化 TSS
+│   └─> tss_init(kernel_stack_top)
+│       └─> 设置 ESP0 为专用内核栈顶
+│       └─> 加载 TSS 到 GDT
+│       └─> ltr 指令加载任务寄存器
+│
+├─> 7. 初始化中断描述符表 (IDT)
+│   └─> idt_initialize()
+│       ├─> 设置 32 个异常门 (DPL=0, flags=0x8E)
+│       ├─> 设置 16 个 IRQ 门 (DPL=3, flags=0xEE)
+│       └─> 设置 1 个系统调用门 (int 0x80, DPL=3, flags=0xEE)
+│
+├─> 8. 初始化可编程中断控制器 (PIC)
 │   └─> pic_initialize()
 │       └─> 重映射 PIC: 主 PIC -> 0x20, 从 PIC -> 0x28
-│       └─> 默认屏蔽所有中断
+│       └─> 默认屏蔽所有中断 (0xFF)
 │
-├─> 5. 初始化定时器
+├─> 9. 初始化定时器
 │   └─> timer_initialize(50)
 │       └─> 设置 PIT 频率为 50Hz
 │   └─> register_interrupt_handler(32, timer_handler)
-│       └─> 注册定时器中断处理函数
-│   └─> pic_unmask_irq(0)
-│       └─> 启用 IRQ0 (定时器中断)
+│   └─> pic_unmask_irq(0)  ──> 启用 IRQ0 (定时器中断)
+│   └─> timer_register_second_callback(on_timer_second)
 │
-├─> 6. 初始化键盘
+├─> 10. 初始化键盘
 │   └─> keyboard_initialize()
 │       └─> 清空键盘缓冲区
 │   └─> register_interrupt_handler(33, keyboard_handler)
-│       └─> 注册键盘中断处理函数
-│   └─> pic_unmask_irq(1)
-│       └─> 启用 IRQ1 (键盘中断)
+│   └─> pic_unmask_irq(1)  ──> 启用 IRQ1 (键盘中断)
 │
-├─> 7. 启用中断
+├─> 11. 初始化 Shell
+│   └─> shell_init()
+│       └─> keyboard_register_char_callback(shell_char_callback)
+│       └─> 显示提示符 "TinyOS> "
+│
+├─> 12. 启用中断
 │   └─> enable_interrupts()  // sti 指令
 │
-└─> 8. 进入主循环
-    └─> while(1) { ... }
+└─> 13. 进入事件驱动主循环
+    └─> while(1) { halt(); }  // 等待中断
+```
+
+---
+
+## 内核初始化顺序图
+
+```
+时序
+│
+├─ [1] 串口初始化         调试输出通道
+├─ [2] GDT 初始化 ────────── 保护模式段管理
+│      ├─ GDT[0]: Null               (必备)
+│      ├─ GDT[1]: 内核代码段  DPL=0  (0x08)
+│      ├─ GDT[2]: 内核数据段  DPL=0  (0x10)
+│      ├─ GDT[3]: 用户代码段  DPL=3  (0x1B)
+│      ├─ GDT[4]: 用户数据段  DPL=3  (0x23)
+│      └─ GDT[5]: TSS 段     DPL=0  (0x28)
+│
+├─ [3] VGA 初始化          屏幕显示
+├─ [4] PMM 初始化 ────────── 物理内存页帧分配
+├─ [5] MM 初始化  ────────── kmalloc/kfree 堆分配器
+├─ [6] TSS 初始化 ────────── Ring 3→Ring 0 栈切换
+├─ [7] IDT 初始化 ────────── 中断/异常/系统调用
+├─ [8] PIC 初始化          中断控制器
+├─ [9] 定时器初始化         IRQ0, 50Hz
+├─[10] 键盘初始化           IRQ1
+├─[11] Shell 初始化         键盘回调绑定
+├─[12] 启用中断             sti
+│
+└─[13] 主循环              halt() 等待中断
 ```
 
 ---
 
 ## 中断处理流程
 
-### 中断发生时
+### 中断/异常发生时
 
 ```
 +-------------+     +------------------+     +------------------+
@@ -110,27 +168,27 @@ kernel_main()
    └─> jmp irq_common_stub
 
 4. irq_common_stub:
-   ├─> pusha            ; 保存所有寄存器
+   ├─> pusha            ; 保存所有寄存器 (8×4=32字节)
    ├─> mov ax, ds       ; 保存数据段
    ├─> push eax
    ├─> mov ax, 0x10     ; 加载内核数据段
-   ├─> mov ds, ax       ; 设置 ds, es, fs, gs
+   ├─> mov ds, es, fs, gs
    │
    ├─> mov ebx, [esp+36]; 获取中断向量号
    ├─> sub ebx, 32      ; 转换为 IRQ 号 (0-15)
-   ├─> push ebx         ; 压入参数
+   ├─> mov eax, esp     ; 寄存器帧指针
+   ├─> push eax         ; 压入 regs 指针
+   ├─> push ebx         ; 压入 IRQ 号
    ├─> call irq_handler ; 调用 C 处理函数！
-   ├─> add esp, 4       ; 清理参数
+   ├─> add esp, 8       ; 清理参数
    │
    ├─> pop eax          ; 恢复数据段
-   ├─> mov ds, ax
    ├─> popa             ; 恢复所有寄存器
    ├─> add esp, 8       ; 清理错误码和向量号
    ├─> sti              ; 启用中断
    └─> iret             ; 中断返回
 
 5. irq_handler(interrupts.c):
-   ├─> 获取 irq_no 参数
    ├─> 调用注册的 handler: isr_handlers[irq_no + 32]
    │   └─> 例如: keyboard_handler()
    └─> pic_send_eoi(irq_no)  ; 发送中断结束信号
@@ -138,7 +196,132 @@ kernel_main()
 6. keyboard_handler(drivers/keyboard.c):
    ├─> inb(0x60)        ; 读取键盘扫描码
    ├─> 解析扫描码 -> ASCII 字符
-   └─> 存入键盘缓冲区
+   └─> 触发字符回调函数
+```
+
+### 异常处理流程 (以用户态 GPF 为例)
+
+```
+用户态执行 hlt (特权指令)
+  │
+  ▼
+CPU 触发 General Protection Fault (#GP, 向量 13)
+  │
+  ▼
+CPU 自动切换到 TSS.ESP0 (内核栈)
+  │
+  ▼
+CPU 压入 SS, ESP, EFLAGS, CS, EIP, Error Code
+  │
+  ▼
+isr13 stub → isr_common_stub
+  │
+  ├─ pusha (保存所有寄存器)
+  ├─ push ds
+  ├─ 设置内核段寄存器
+  ├─ push regs_ptr, err_code, int_no
+  └─ call isr_handler
+       │
+       ▼
+     isr_handler(int_no=13, err_code=0, regs)
+       │
+       ├─ exception_handler(13, 0)
+       │   └─ 打印 "*** EXCEPTION: General Protection Fault ***"
+       │
+       ├─ 检查: int_no==13 && (regs[12] & 3)==3
+       │        (CS.RPL=3 表示来自用户态)
+       │   └─ regs[11] += 1  ← 跳过 hlt 指令 (1字节)
+       │   └─ 打印 "Skipped faulty instruction"
+       │
+       └─ 返回 → 恢复寄存器 → iret
+                     │
+                     ▼
+               回到用户态，执行 syscall 0
+```
+
+### 系统调用流程 (int 0x80)
+
+```
+用户态: mov eax, 0  ; syscall number
+        int 0x80    ; 触发系统调用
+
+CPU 切换到 TSS.ESP0 (内核栈)
+  │
+  ▼
+isr128 stub (interrupts.asm):
+  ├─ cli
+  ├─ push 0          ; 虚拟错误码
+  ├─ push 128        ; 向量号
+  ├─ pusha           ; 保存寄存器
+  ├─ push ds         ; 保存数据段
+  ├─ 设置内核段
+  ├─ push regs_ptr
+  └─ call syscall_handler(regs)
+       │
+       ▼
+     syscall_handler(regs)
+       │
+       ├─ regs[8] = EAX = syscall number
+       │
+       ├─ syscall 0: 返回内核态
+       │   ├─ regs[11] = (uint32_t)user_exit_handler  ← EIP
+       │   └─ regs[12] = 0x08                         ← CS (内核代码段)
+       │
+       └─ syscall 1: 打印消息
+           └─ vga_writestring("[Syscall] #1 from user mode\n")
+               
+返回 → pop ds → popa → add esp,8 → iret
+```
+
+---
+
+## 用户态切换流程
+
+### 内核态 → 用户态
+
+```
+test_user_mode()  (kernel.c)
+  │
+  └─ run_user_task(user_main)  (user.asm)
+       │
+       ├─ 保存内核栈指针 [saved_kernel_esp]
+       ├─ 加载用户数据段: DS/ES/FS/GS = 0x23
+       │
+       └─ 构建 IRET 帧并执行 iret:
+            +------------------+
+            | SS  = 0x23       |  ← 用户数据段 + RPL=3
+            | ESP = user_stack |  ← 用户栈
+            | EFLAGS           |
+            |     IF=1, IOPL=3 |  ← 启用中断
+            | CS  = 0x1B       |  ← 用户代码段 + RPL=3
+            | EIP = user_main  |  ← 用户程序入口
+            +------------------+
+              │
+              ▼
+            CPU 执行 iret → 切换到 Ring 3
+```
+
+### 用户态 → 内核态 (syscall 0)
+
+```
+user_main (Ring 3)
+  │
+  └─ mov eax, 0
+     int 0x80
+       │
+       ▼
+     syscall_handler  (Ring 0, 通过 TSS.ESP0 切换栈)
+       │
+       ├─ regs[11] = user_exit_handler  (修改 EIP)
+       └─ regs[12] = 0x08              (修改 CS = 内核段)
+       
+       iret → 同级切换 (RPL=0 == CPL=0)
+         │
+         ▼
+       user_exit_handler  (Ring 0)
+         ├─ mov ds/es/fs/gs = 0x10  (内核数据段)
+         ├─ mov esp = [saved_kernel_esp]
+         └─ ret → 回到 run_user_task 调用者
 ```
 
 ---
@@ -147,48 +330,123 @@ kernel_main()
 
 ```c
 while (1) {
-    // 1. 检查定时器
-    uint32_t current_ticks = timer_get_ticks();
-    if (current_ticks != last_ticks) {
-        // 每秒输出一次调试信息
-    }
-    
-    // 2. 检查键盘输入
-    if (keyboard_has_input()) {
-        char c = keyboard_read_char();
-        // 显示字符到屏幕
-        vga_putchar(c);
-    }
+    halt();  // 等待中断
 }
 ```
 
-**注意：** 这是一个轮询循环，不是多任务系统。真正的操作系统会使用进程调度。
+**事件驱动模型：**
+- 系统不主动轮询任何设备
+- CPU 执行 `halt` 指令进入低功耗状态
+- 中断发生时 CPU 被唤醒，执行对应的中断处理函数
+- 中断返回后回到 `halt`，继续等待下一个中断
+
+**中断事件处理：**
+- **定时器中断 (IRQ0)**：每 20ms 触发一次，累计 ticks
+  - 每秒触发 `on_timer_second()` 更新状态栏
+- **键盘中断 (IRQ1)**：按键触发
+  - 读取扫描码，转换为 ASCII
+  - 触发注册的字符回调函数（Shell 回调）
+- **系统调用 (int 0x80)**：用户态主动触发
+  - 执行对应的系统调用功能
+
+---
+
+## GDT (全局描述符表)
+
+### 布局
+
+| 索引 | 选择子 | 段 | DPL | 类型 | 基址 | 大小 |
+|------|--------|-----|-----|------|------|------|
+| GDT[0] | 0x00 | Null 段 | - | - | 0 | 0 |
+| GDT[1] | 0x08 | 内核代码段 | 0 | 代码, 可读, 非一致 | 0 | 4GB |
+| GDT[2] | 0x10 | 内核数据段 | 0 | 数据, 可读写 | 0 | 4GB |
+| GDT[3] | 0x1B | 用户代码段 | 3 | 代码, 可读, 非一致 | 0 | 4GB |
+| GDT[4] | 0x23 | 用户数据段 | 3 | 数据, 可读写 | 0 | 4GB |
+| GDT[5] | 0x28 | TSS 段 | 0 | TSS (可用) | TSS 地址 | sizeof(TSS) |
+
+### 段描述符结构 (8字节)
+
+```
+  字节 0,1: 段限长低 16 位
+  字节 2,3: 基址低 16 位
+  字节 4:   基址 16-23 位
+  字节 5:   标志位 (Type, S, DPL, P)
+  字节 6:   标志位 (G, D/B, L, AVL) + 段限长高 4 位
+  字节 7:   基址 24-31 位
+```
+
+### 选择子格式
+
+```
+Bit  15-3: 索引 (GDT 中的位置)
+Bit  2:    TI (0=GDT, 1=LDT)
+Bit  1-0:  RPL (请求特权级, 0=内核, 3=用户)
+
+示例:
+0x08 = 索引=1, TI=0, RPL=0  → GDT[1], 内核态
+0x1B = 索引=3, TI=0, RPL=3  → GDT[3], 用户态
+```
+
+---
+
+## TSS (任务状态段)
+
+### 结构
+
+```c
+struct tss_entry {
+    uint32_t prev_tss;   // 上一个 TSS 的链接
+    uint32_t esp0;       // Ring 0 栈指针
+    uint32_t ss0;        // Ring 0 栈段
+    uint32_t esp1;       // Ring 1 栈指针 (未使用)
+    uint32_t ss1;        // Ring 1 栈段
+    uint32_t esp2;       // Ring 2 栈指针 (未使用)
+    uint32_t ss2;        // Ring 2 栈段
+    uint32_t cr3;        // 页目录基址
+    uint32_t eip;
+    // ... 其他寄存器保存字段 ...
+    uint32_t iomap_base; // I/O 位图基址
+};
+```
+
+### TSS 的关键作用
+
+当 CPU 在较低特权级 (Ring 3) 运行时发生中断或异常，需要切换到较高特权级 (Ring 0) 处理：
+
+1. CPU 从 **TSS** 读取 `SS0` 和 `ESP0`
+2. 将当前 SS、ESP 压入新栈 (Ring 0 栈)
+3. 将 EFLAGS、CS、EIP 压入新栈
+4. 切换到 Ring 0 执行中断处理
+
+**重要**：TSS.ESP0 必须指向专用内核栈，不能是当前正在使用的栈，否则会覆盖数据。
 
 ---
 
 ## 内存布局
 
 ```
-地址范围              内容
-+------------------+
-| 0x00000000       |  中断向量表 (IVT) - 实模式
-| 0x00000400       |  BIOS 数据区
-| 0x00007C00       |  引导扇区加载地址
-| ...              |
-| 0x0009FC00       |  640KB 常规内存上限
-+------------------+
-| 0x000A0000       |  VGA 图形缓冲区
-| 0x000B0000       |  VGA 文本缓冲区 (0xB8000)
-| 0x000C0000       |  VGA BIOS
-| 0x000F0000       |  系统 BIOS
-+------------------+
-| 0x00100000       |  <-- 内核加载地址 (1MB)
-|                  |  .text (代码段)
-|                  |  .rodata (只读数据)
-|                  |  .data (已初始化数据)
-|                  |  .bss (未初始化数据)
-| 0x00108000       |  <-- 栈顶 (1MB + 32KB)
-+------------------+
+0x00000000 ┌──────────────────────┐
+           │  中断向量表 (实模式)   │
+0x00000400 │  BIOS 数据区          │
+0x00007C00 │  引导扇区             │
+0x0009FC00 │  640KB 常规内存上限    │
+0x000A0000 ├──────────────────────┤
+           │  VGA 图形缓冲区       │
+0x000B0000 │  VGA 文本缓冲区       │
+           │  (0xB8000)           │
+0x000C0000 │  VGA BIOS            │
+0x000F0000 │  系统 BIOS            │
+0x00100000 ├──────────────────────┤  ← 内核加载地址 (1MB)
+           │  .text (代码段)       │
+           │  .rodata (只读数据)   │
+           │  .data (已初始化数据)  │
+           │  .bss (未初始化数据)   │
+0x00108000 ├──────────────────────┤  ← 栈顶 (1MB + 32KB)
+           │                      │
+           │  PMM 管理区域         │
+           │  (物理内存页帧)       │
+           │                      │
+0x02000000 └──────────────────────┘  ← 假设 32MB 内存上限
 ```
 
 ---
@@ -204,21 +462,38 @@ while (1) {
 +--------------------+--+-----+--+-+-+-+-+-+------------------+
 
 P   = Present (1 = 有效)
-DPL = Descriptor Privilege Level (0 = 内核)
-D   = 门类型 (1 = 32位)
+DPL = Descriptor Privilege Level (0 = 内核, 3 = 用户)
+D   = 门类型 (1 = 32位中断门)
+
+常见 flags 值:
+0x8E = present, DPL=0, 32-bit interrupt gate  → 异常处理
+0xEE = present, DPL=3, 32-bit interrupt gate  → IRQ 和系统调用
 ```
 
-### PIC 初始化流程 (ICW)
+### PMM 位图结构
 
 ```
-ICW1: 0x11  -> 开始初始化，级联模式，需要 ICW4
-ICW2: 0x20  -> 主 PIC 向量偏移 (32)
-      0x28  -> 从 PIC 向量偏移 (40)
-ICW3: 0x04  -> 主 PIC: IRQ2 连接从 PIC
-      0x02  -> 从 PIC: 连接到主 PIC 的 IRQ2
-ICW4: 0x01  -> 8086 模式
-OCW1: 0xFF  -> 屏蔽所有中断（初始化时）
-      0x00  -> 取消屏蔽（运行时）
+位图: 每一位代表一个 4KB 物理页
+  bit=0: 空闲
+  bit=1: 已分配
+
+示例: 32MB 内存 = 8192 页 = 8192 位 = 1024 字节位图
+
+分配: 在位图中查找第一个 bit=0 的位置, 标记为 1
+释放: 将对应位标记为 0
+```
+
+### MM 堆块结构
+
+```c
+struct mm_block {
+    uint32_t magic;      // 魔数 (0xDEADBEEF) 用于检测有效性
+    uint32_t size;       // 块大小 (包括头部)
+    uint32_t free;       // 1=空闲, 0=已分配
+    struct mm_block* next; // 下一个块
+    struct mm_block* prev; // 上一个块
+    // 数据区紧随其后
+};
 ```
 
 ---
@@ -228,25 +503,70 @@ OCW1: 0xFF  -> 屏蔽所有中断（初始化时）
 ```
 boot.asm
     └─> kernel_main() [kernel.c]
-        ├─> vga_initialize() [vga.c]
-        ├─> idt_initialize() [interrupts.c]
-        │   └─> idt_load() [interrupts.asm]
-        ├─> pic_initialize() [interrupts.c]
-        ├─> timer_initialize() [timer.c]
-        │   └─> outb() [io.asm]
-        ├─> register_interrupt_handler() [interrupts.c]
+        ├─> gdt_init()          [gdt.c]
+        │   └─> gdt_asm.SET_GDT [gdt.asm]
+        │       └─> lgdt
+        │
+        ├─> vga_initialize()    [vga.c]
+        │   └─> outb()          [io.asm]
+        │
+        ├─> pmm_init()          [pmm.c]
+        │   └─> 使用 GRUB 内存映射
+        │
+        ├─> mm_init()           [mm.c]
+        │   └─> pmm_alloc_page() [pmm.c]
+        │
+        ├─> tss_init()          [tss.c]
+        │   └─> gdt_set_gate()  [gdt.c]
+        │       └─> gdt_flush() [gdt.asm]
+        │           └─> ltr
+        │
+        ├─> idt_initialize()    [interrupts.c]
+        │   └─> idt_load()      [interrupts.asm]
+        │       └─> lidt
+        │
+        ├─> pic_initialize()    [interrupts.c]
+        │   └─> outb()          [io.asm]
+        │
+        ├─> timer_initialize()  [timer.c]
+        │   └─> outb()          [io.asm]
+        │
         ├─> keyboard_initialize() [keyboard.c]
-        │   └─> inb() [io.asm]
-        ├─> pic_unmask_irq() [interrupts.c]
-        └─> enable_interrupts() [io.h - inline]
+        │   └─> inb()           [io.asm]
+        │
+        └─> shell_init()        [shell.c]
+            └─> keyboard_register_char_callback() [keyboard.c]
 
-中断发生时:
-    interrupts.asm (irq1 stub)
-        └─> irq_handler() [interrupts.c]
-            ├─> keyboard_handler() [keyboard.c]
-            │   ├─> inb() [io.asm]
-            │   └─> outb() [io.asm] (serial debug)
-            └─> pic_send_eoi() [interrupts.c]
+中断/异常发生时:
+    interrupts.asm (stub)
+        │
+        ├─ isr_handler()        [interrupts.c]
+        │   └─ exception_handler() [except.c]
+        │       └─ vga_writestring() [vga.c]
+        │
+        └─ irq_handler()        [interrupts.c]
+            ├─ timer_handler()  [timer.c]
+            ├─ keyboard_handler() [keyboard.c]
+            │   └─ inb() / outb() [io.asm]
+            └─ pic_send_eoi()   [interrupts.c]
+
+系统调用 (int 0x80):
+    user.asm (user_main, Ring 3)
+        └─ int 0x80
+            └─ isr128 stub [interrupts.asm]
+                └─ syscall_handler() [interrupts.c]
+                    ├─ vga_writestring() [vga.c]
+                    └─ user_exit_handler() [user.asm]
+
+用户态切换:
+    kernel.c (test_user_mode)
+        └─ run_user_task() [user.asm]
+            └─ iret → Ring 3
+                └─ user_main
+                    ├─ syscall 1 → 打印
+                    ├─ hlt → GPF → 捕获并跳过
+                    └─ syscall 0 → 返回 Ring 0
+                        └─ user_exit_handler → 回到 kernel.c
 ```
 
 ---
@@ -270,13 +590,28 @@ static void serial_write(char c) {
 | 向量 | 名称 | 说明 |
 |------|------|------|
 | 0 | Divide Error | 除零错误 |
+| 6 | Invalid Opcode | 无效操作码 |
 | 8 | Double Fault | 双重故障 |
 | 13 | General Protection Fault | 通用保护故障 |
 | 14 | Page Fault | 页故障 |
 | 32 | IRQ0 | 定时器 |
 | 33 | IRQ1 | 键盘 |
-| 46 | IRQ14 | 主 IDE |
+| 128 (0x80) | Syscall | 系统调用 |
 
 ### 3. 寄存器查看
 
 使用 QEMU 调试：`qemu-system-i386 -kernel tinyos.bin -d int,cpu_reset`
+
+### 4. 异常错误码解析
+
+| 错误码 | 含义 |
+|--------|------|
+| 0x00 | 非段相关违规（如特权指令） |
+| 其他 | 段选择子索引（如 0x18=GDT[3]） |
+
+### 5. 用户态调试要点
+
+- 检查 CS 选择子是否正确设置了 RPL=3（0x1B 而非 0x18）
+- 检查 TSS.ESP0 是否指向有效且未使用的内核栈
+- 检查 IRQ 和系统调用的 IDT 门 DPL 是否为 3（0xEE）
+- 检查用户态 EFLAGS.IF 是否为 1（启用中断）

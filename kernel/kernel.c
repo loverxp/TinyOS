@@ -6,8 +6,19 @@
 #include "../include/shell.h"
 #include "../include/pmm.h"
 #include "../include/mm.h"
+#include "../include/gdt.h"
+#include "../include/tss.h"
 
-extern void gdt_init(void);
+// User mode entry points (from user.asm)
+extern void run_user_task(void (*entry)(void));
+extern void user_main(void);
+
+// Test user mode switching from kernel
+void test_user_mode(void) {
+    vga_writestring("Switching to Ring 3 (user mode)...\n");
+    run_user_task(user_main);
+    vga_writestring("Back in kernel mode! Test passed.\n");
+}
 
 static void serial_write(char c) {
     while ((inb(0x3FD) & 0x20) == 0);
@@ -85,6 +96,13 @@ void kernel_main(uint32_t multiboot_info_addr) {
     vga_writestring("[OK] Kernel heap initialized\n");
     serial_string("[OK] MM\n");
 
+    // Initialize TSS for Ring 3 -> Ring 0 transitions
+    // Allocate a dedicated 4KB kernel stack for TSS
+    static uint8_t tss_kernel_stack[4096] __attribute__((aligned(16)));
+    tss_init((uint32_t)tss_kernel_stack + 4096);
+    vga_writestring("[OK] TSS initialized\n");
+    serial_string("[OK] TSS\n");
+
     idt_initialize();
     vga_writestring("[OK] IDT initialized\n");
     serial_string("[OK] IDT\n");
@@ -114,11 +132,11 @@ void kernel_main(uint32_t multiboot_info_addr) {
     vga_writestring("[OK] Interrupts enabled\n\n");
     serial_string("[OK] Interrupts enabled\n");
 
-    vga_writestring("Type 'help' for available commands.\n");
+    vga_writestring("Type 'help' for available commands.\n\n");
 
     serial_string("Ready, entering main loop...\n");
 
-    // Event-driven main loop: just wait for interrupts
+    // Event-driven main loop: shell runs in kernel mode (Ring 0)
     while (1) {
         halt();
     }

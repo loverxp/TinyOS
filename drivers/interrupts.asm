@@ -84,12 +84,41 @@ IRQ 13, 45
 IRQ 14, 46
 IRQ 15, 47
 
+; Syscall interrupt (int 0x80) - can be called from Ring 3
+extern syscall_handler
+global isr128
+isr128:
+    cli
+    push byte 0     ; Dummy error code
+    push dword 128   ; Interrupt number (0x80)
+    pusha
+    mov ax, ds
+    push eax
+
+    mov ax, 0x10    ; Kernel data segment
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+    ; Call C handler with pointer to register frame
+    ; regs[0]=ds, [1]=edi, ..., [8]=eax, [9]=int_no, [10]=err_code
+    mov eax, esp
+    push eax
+    call syscall_handler
+    add esp, 4
+
+    pop eax
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+    popa
+    add esp, 8
+    iret
+
 ; Common ISR stub
-; After pusha (32 bytes) + push eax (4 bytes):
-;   [esp+36] = original esp before pusha
-;   [esp+40] = eflags
-;   [esp+44] = int_no (pushed by ISR stub)
-;   [esp+48] = err_code (pushed by ISR stub)
 isr_common_stub:
     pusha           ; Push all registers (32 bytes)
     
@@ -101,29 +130,19 @@ isr_common_stub:
     mov es, ax
     mov fs, ax
     mov gs, ax
-    
+
     ; Get int_no and err_code from stack
-    ; Stack layout after pusha and push eax:
-    ; [esp]    = ds (saved)
-    ; [esp+4]  = eax (from pusha)
-    ; [esp+8]  = ecx (from pusha)
-    ; [esp+12] = edx (from pusha)
-    ; [esp+16] = ebx (from pusha)
-    ; [esp+20] = esp (from pusha)
-    ; [esp+24] = ebp (from pusha)
-    ; [esp+28] = esi (from pusha)
-    ; [esp+32] = edi (from pusha)
-    ; [esp+36] = int_no
-    ; [esp+40] = err_code
-    ; [esp+44] = eflags (from CPU)
-    ; [esp+48] = cs (from CPU)
-    ; [esp+52] = eip (from CPU)
+    ; Stack: [esp]=ds, [esp+4]=edi(pa)...[esp+36]=int_no,[esp+40]=err_code
     mov ebx, [esp + 36]   ; int_no
     mov ecx, [esp + 40]   ; err_code
+
+    ; Push regs frame pointer (esp points to saved ds)
+    mov eax, esp
+    push eax              ; Push regs pointer
     push ecx              ; Push err_code
     push ebx              ; Push int_no
     call isr_handler
-    add esp, 8            ; Clean up both parameters
+    add esp, 12           ; Clean up all 3 parameters
     
     pop eax         ; Restore data segment
     mov ds, ax
@@ -134,7 +153,7 @@ isr_common_stub:
     popa            ; Pop all registers
     add esp, 8      ; Clean up error code and interrupt number
     sti
-    iret            ; Return from interrupt
+    iret
 
 ; Common IRQ stub
 irq_common_stub:
@@ -148,13 +167,17 @@ irq_common_stub:
     mov es, ax
     mov fs, ax
     mov gs, ax
-    
-    ; Calculate IRQ number from interrupt vector
-    mov ebx, [esp + 36]   ; Get int_no (remapped vector)
+
+    ; Get int_no from stack, convert to IRQ number
+    mov ebx, [esp + 36]   ; Get int_no (remapped vector: 32-47)
     sub ebx, 32           ; Convert to IRQ number (0-15)
-    push ebx              ; Pass IRQ number as parameter
+
+    ; Push regs frame pointer
+    mov eax, esp
+    push eax              ; Push regs pointer
+    push ebx              ; Push IRQ number
     call irq_handler
-    add esp, 4            ; Clean up parameter
+    add esp, 8            ; Clean up 2 parameters
     
     pop eax         ; Restore data segment
     mov ds, ax
@@ -165,7 +188,7 @@ irq_common_stub:
     popa            ; Pop all registers
     add esp, 8      ; Clean up error code and interrupt number
     sti
-    iret            ; Return from interrupt
+    iret
 
 ; IDT load function
 global idt_load

@@ -46,6 +46,7 @@ static void shell_handle_command(const char* cmd) {
         vga_writestring("  except     - Trigger Division By Zero\n");
         vga_writestring("  kmtest     - Run kmalloc/kfree test\n");
         vga_writestring("  echo <txt> - Echo text\n");
+        vga_writestring("  testuser   - Switch to Ring 3 and return\n");
     } else if (strcmp(cmd, "clear") == 0) {
         vga_clear_screen(VGA_COLOR_BLACK);
         vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
@@ -124,6 +125,9 @@ static void shell_handle_command(const char* cmd) {
         while (*text == ' ') text++;
         vga_writestring(text);
         vga_putchar('\n');
+    } else if (strcmp(cmd, "testuser") == 0) {
+        extern void test_user_mode(void);
+        test_user_mode();
     } else {
         vga_writestring("Unknown command: ");
         vga_writestring(cmd);

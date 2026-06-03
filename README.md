@@ -38,17 +38,39 @@
 
 进入系统后，可直接在 `TinyOS>` 提示符下输入命令：
 
-| 命令 | 说明 |
-|------|------|
-| `help` | 显示所有可用命令 |
-| `clear` | 清屏 |
-| `uptime` | 显示系统运行时间 |
-| `meminfo` | 显示物理内存信息 |
-| `alloc <大小>` | 分配指定字节的内存并显示地址 |
-| `free <地址>` | 释放指定地址的内存 |
-| `kmtest` | 运行 kmalloc/kfree 堆分配器测试 |
-| `except` | 触发除零异常测试异常处理 |
-| `echo <文本>` | 回显输入的文本 |
+| 命令            | 说明                      |
+| ------------- | ----------------------- |
+| `help`        | 显示所有可用命令                |
+| `clear`       | 清屏                      |
+| `uptime`      | 显示系统运行时间                |
+| `meminfo`     | 显示物理内存信息                |
+| `alloc <N>`   | 分配 N 个物理页（默认 1）         |
+| `free 0xADDR` | 释放指定地址的物理页              |
+| `kmtest`      | 运行 kmalloc/kfree 堆分配器测试 |
+| `except`      | 触发除零异常测试异常处理            |
+| `echo <文本>`   | 回显输入的文本                 |
+| `testuser`    | 切换到 Ring 3（用户态）并返回      |
+
+## 功能特性
+
+- ✅ Multiboot 兼容引导
+- ✅ 32位 x86 保护模式
+  - ✅ GDT（全局描述符表）—— 内核段 + 用户段 + TSS
+  - ✅ 用户态（Ring 3）/ 内核态（Ring 0）切换
+  - ✅ TSS（任务状态段）—— 特权级切换栈管理
+- ✅ VGA 文本显示 (80x25, 16色)
+- ✅ VGA 状态栏（系统运行时间、堆使用量、空闲内存）
+- ✅ 硬件光标
+- ✅ 键盘输入（中断驱动，事件回调）
+- ✅ 定时器中断（中断驱动，事件回调）
+- ✅ 中断描述符表 (IDT)
+  - ✅ 异常处理（除零、GPF 等）
+  - ✅ 用户态异常捕获与指令跳过
+- ✅ 物理内存管理（PMM，位图式页帧分配器）
+- ✅ 堆内存分配器（kmalloc/kfree，块式管理）
+- ✅ 交互式 Shell（多命令支持）
+- ✅ 系统调用（int 0x80，支持从用户态返回内核态）
+- ✅ 串口调试输出
 
 ## 项目结构
 
@@ -58,59 +80,143 @@ TinyOS/
 ├── kernel/
 │   ├── kernel.c           # 内核主程序
 │   ├── shell.c            # 交互式 Shell
+│   ├── gdt.c              # GDT 初始化（C 部分）
+│   ├── tss.c              # TSS 初始化
 │   ├── pmm.c              # 物理内存管理器（位图分配）
 │   ├── mm.c               # 堆内存分配器（kmalloc/kfree）
-│   └── except.c           # 异常处理
+│   ├── except.c           # 异常处理
+│   └── user.asm           # 用户态入口和切换逻辑
 ├── drivers/
 │   ├── vga.c              # VGA 文本显示（80x25, 状态栏）
-│   ├── keyboard.c         # 键盘驱动（事件驱动）
-│   ├── timer.c            # 定时器驱动（事件驱动）
+│   ├── keyboard.c         # 键盘驱动（中断驱动）
+│   ├── timer.c            # 定时器驱动（中断驱动）
 │   ├── interrupts.c       # 中断处理（C 部分）
-│   ├── interrupts.asm     # 中断处理（汇编部分）
-│   ├── gdt.asm            # 全局描述符表
+│   ├── interrupts.asm     # 中断处理中断桩（汇编）
+│   ├── gdt.asm            # GDT 表定义（汇编）
 │   └── io.asm             # I/O 端口操作
 ├── lib/string.c           # 字符串处理
 ├── include/               # 头文件
+│   ├── types.h            # 类型定义
 │   ├── vga.h
 │   ├── keyboard.h
 │   ├── timer.h
+│   ├── shell.h
 │   ├── interrupts.h
+│   ├── except.h
+│   ├── gdt.h
+│   ├── tss.h
 │   ├── pmm.h
-│   └── mm.h
+│   ├── mm.h
+│   ├── io.h
+│   ├── string.h
+│   └── stdio.h
 ├── tools/                 # 交叉编译器
 ├── nasm.exe               # 汇编器
 ├── linker.ld              # 链接器脚本
 ├── tinyos.bin             # 编译后的内核
 ├── build_simple.bat       # 构建脚本
-└── run.bat                # 运行脚本
+├── run.bat                # 运行脚本
+├── AGENTS.md              # AI 助手说明
+├── ARCHITECTURE.md        # 架构与主流程详解
+├── ROADMAP.md             # 演化路线图
+├── TROUBLESHOOTING.md     # 问题排查记录
+└── README.md              # 本文件
 ```
 
-## 功能特性
+## 系统架构概要
 
-- ✅ Multiboot 兼容引导
-- ✅ 32位 x86 保护模式（GDT）
-- ✅ VGA 文本显示 (80x25, 16色)
-- ✅ VGA 状态栏（系统运行时间、堆使用量、空闲内存）
-- ✅ 硬件光标
-- ✅ 键盘输入（事件驱动）
-- ✅ 定时器中断（事件驱动）
-- ✅ 中断描述符表 (IDT)
-- ✅ 异常处理（除零等）
-- ✅ 物理内存管理（PMM，位图式页帧分配器）
-- ✅ 堆内存分配器（kmalloc/kfree，块式管理）
-- ✅ 交互式 Shell（多命令支持）
-- ✅ 串口调试输出
+```
++-------------+     +-------------+     +-------------+     +-----------------+
+|  QEMU/GRUB  | --> |  boot.asm   | --> | kernel_main | --> |  事件驱动主循环  |
+|  (Bootloader)|    | (Multiboot) |     |   初始化...   |     |  halt 等待中断  |
++-------------+     +-------------+     +-------------+     +-----------------+
+                                                                    |
+                    +-------------------+------------------+--------+
+                    |                   |                  |
+                    ▼                   ▼                  ▼
+              定时器中断             键盘中断         用户态切换
+              (IRQ0, 50Hz)          (IRQ1)          (int 0x80)
+```
+
+### 初始化顺序
+
+```
+kernel_main()
+  1. 串口初始化（调试输出）
+  2. GDT 初始化（内核段 + 用户段 + TSS）
+  3. VGA 初始化（清屏、光标重置）
+  4. PMM 初始化（从 GRUB 获取内存映射）
+  5. MM 初始化（基于 PMM 的堆分配器）
+  6. TSS 初始化（分配内核栈，供 Ring 3→Ring 0 使用）
+  7. IDT 初始化（异常 + IRQ + 系统调用门）
+  8. PIC 初始化（重映射，全部屏蔽）
+  9. 定时器初始化（注册 handler，unmask IRQ0）
+  10. 键盘初始化（注册 handler，unmask IRQ1）
+  11. Shell 初始化（注册键盘回调）
+  12. 启用中断（sti）
+  13. 事件驱动主循环（halt）
+```
+
+### 用户态切换流程
+
+```
+testuser 命令
+  │
+  ▼
+run_user_task(user_main)    ← 内核态（Ring 0）
+  │
+  ├─ 设置用户段寄存器 (DS/ES/FS/GS = 0x23)
+  ├─ 构建 IRET 帧 (SS=0x23, CS=0x1B, EFLAGS.IF=1)
+  └─ iret                    → 切换到用户态（Ring 3）
+                                │
+                                ▼
+                          user_main (Ring 3)
+                                │
+                          ├─ syscall 1 → 打印消息
+                          ├─ hlt       → 触发 GPF（被捕获并跳过）
+                          └─ syscall 0 → 返回内核态
+                                │
+                                ▼
+                          user_exit_handler (Ring 0)
+                                ├─ 恢复内核段寄存器
+                                ├─ 恢复内核栈
+                                └─ ret → 回到 run_user_task 调用者
+```
 
 ## 技术支持
 
 ### 内存布局
 
-| 区域 | 地址 |
-|------|------|
-| 内核加载地址 | 0x100000 (1MB) |
-| 栈顶 | 0x108000 |
-| VGA 缓冲区 | 0xB8000 |
-| 内核堆 | PMM 动态分配 |
+| 区域      | 地址             |
+| ------- | -------------- |
+| 内核加载地址  | 0x100000 (1MB) |
+| 栈顶      | 0x108000       |
+| VGA 缓冲区 | 0xB8000        |
+| 内核堆     | PMM 动态分配       |
+
+### GDT 布局
+
+| 选择子  | 段      | DPL    |
+| ---- | ------ | ------ |
+| 0x00 | Null 段 | -      |
+| 0x08 | 内核代码段  | Ring 0 |
+| 0x10 | 内核数据段  | Ring 0 |
+| 0x1B | 用户代码段  | Ring 3 |
+| 0x23 | 用户数据段  | Ring 3 |
+| 0x28 | TSS 段  | Ring 0 |
+
+### 中断向量
+
+| 向量         | 名称                       | 说明        |
+| ---------- | ------------------------ | --------- |
+| 0          | Divide Error             | 除零错误      |
+| 6          | Invalid Opcode           | 无效操作码     |
+| 8          | Double Fault             | 双重故障      |
+| 13         | General Protection Fault | 通用保护故障    |
+| 14         | Page Fault               | 页故障       |
+| 32         | IRQ0                     | 定时器（50Hz） |
+| 33         | IRQ1                     | 键盘        |
+| 128 (0x80) | Syscall                  | 系统调用      |
 
 ### 构建工具链
 
@@ -118,6 +224,23 @@ TinyOS/
 - **i686-elf-gcc**: 交叉编译器，编译 C 代码
 - **i686-elf-ld**: 链接器
 - **QEMU**: 模拟器，位于 `D:\Program Files\qemu`
+
+### 构建命令
+
+```bash
+# 汇编
+nasm -f elf32 boot/boot.asm -o build/boot.o
+nasm -f elf32 drivers/interrupts.asm -o build/interrupts.o
+nasm -f elf32 drivers/gdt.asm -o build/gdt_asm.o
+nasm -f elf32 drivers/io.asm -o build/io.o
+nasm -f elf32 kernel/user.asm -o build/user.o
+
+# 编译 C 文件
+i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c <file.c> -o <file.o>
+
+# 链接
+i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin <所有 .o 文件>
+```
 
 ## 许可证
 

@@ -52,10 +52,13 @@ if not exist build mkdir build
 REM Assemble
 %NASM% -f elf32 boot/boot.asm -o build\boot.o
 %NASM% -f elf32 drivers/interrupts.asm -o build\interrupts.o
-%NASM% -f elf32 drivers/gdt.asm -o build\gdt.o
+%NASM% -f elf32 drivers/gdt.asm -o build\gdt_asm.o
 %NASM% -f elf32 drivers/io.asm -o build\io.o
+%NASM% -f elf32 kernel/user.asm -o build\user.o
 
 REM Compile
+%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c kernel/gdt.c -o build\gdt.o
+%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c kernel/tss.c -o build\tss.o
 %GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c kernel/kernel.c -o build\kernel.o
 %GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c kernel/except.c -o build\except.o
 %GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c kernel/shell.c -o build\shell.o
@@ -68,7 +71,7 @@ REM Compile
 %GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c lib/string.c -o build\string.o
 
 REM Link
-%LD% -T linker.ld -nostdlib -o tinyos.bin build\boot.o build\interrupts.o build\gdt.o build\io.o build\kernel.o build\except.o build\shell.o build\pmm.o build\mm.o build\vga.o build\keyboard.o build\timer.o build\interrupts_c.o build\string.o
+%LD% -T linker.ld -nostdlib -o tinyos.bin build\boot.o build\interrupts.o build\gdt_asm.o build\gdt.o build\tss.o build\io.o build\kernel.o build\except.o build\shell.o build\pmm.o build\mm.o build\user.o build\vga.o build\keyboard.o build\timer.o build\interrupts_c.o build\string.o
 
 echo.
 echo Build complete!
