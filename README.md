@@ -1,6 +1,6 @@
 # TinyOS - 简单操作系统
 
-一个基于 C 语言的简单操作系统，可在 QEMU 模拟器上运行。
+一个基于 C 语言的简单操作系统内核，可在 QEMU 模拟器上运行。
 
 ## 快速开始
 
@@ -34,43 +34,90 @@
    "D:\Program Files\qemu\qemu-system-i386.exe" -kernel tinyos.bin -m 32
    ```
 
+## Shell 命令
+
+进入系统后，可直接在 `TinyOS>` 提示符下输入命令：
+
+| 命令 | 说明 |
+|------|------|
+| `help` | 显示所有可用命令 |
+| `clear` | 清屏 |
+| `uptime` | 显示系统运行时间 |
+| `meminfo` | 显示物理内存信息 |
+| `alloc <大小>` | 分配指定字节的内存并显示地址 |
+| `free <地址>` | 释放指定地址的内存 |
+| `kmtest` | 运行 kmalloc/kfree 堆分配器测试 |
+| `except` | 触发除零异常测试异常处理 |
+| `echo <文本>` | 回显输入的文本 |
+
 ## 项目结构
 
 ```
 TinyOS/
-├── boot/boot.asm          # Multiboot 引导程序
-├── kernel/kernel.c        # 内核主程序
-├── drivers/               # 设备驱动
-│   ├── vga.c             # VGA 显示
-│   ├── keyboard.c        # 键盘驱动
-│   ├── timer.c           # 定时器
-│   ├── interrupts.c/asm  # 中断处理
-│   ├── gdt.asm           # 全局描述符表
-│   └── io.asm            # I/O 端口
-├── lib/string.c          # 字符串处理
-├── include/              # 头文件
-├── tools/                # 交叉编译器 (2GB+)
-├── nasm.exe              # 汇编器
-├── tinyos.bin            # 编译后的内核
-├── build_simple.bat      # 构建脚本
-└── run.bat               # 运行脚本
+├── boot/boot.asm           # Multiboot 引导程序
+├── kernel/
+│   ├── kernel.c           # 内核主程序
+│   ├── shell.c            # 交互式 Shell
+│   ├── pmm.c              # 物理内存管理器（位图分配）
+│   ├── mm.c               # 堆内存分配器（kmalloc/kfree）
+│   └── except.c           # 异常处理
+├── drivers/
+│   ├── vga.c              # VGA 文本显示（80x25, 状态栏）
+│   ├── keyboard.c         # 键盘驱动（事件驱动）
+│   ├── timer.c            # 定时器驱动（事件驱动）
+│   ├── interrupts.c       # 中断处理（C 部分）
+│   ├── interrupts.asm     # 中断处理（汇编部分）
+│   ├── gdt.asm            # 全局描述符表
+│   └── io.asm             # I/O 端口操作
+├── lib/string.c           # 字符串处理
+├── include/               # 头文件
+│   ├── vga.h
+│   ├── keyboard.h
+│   ├── timer.h
+│   ├── interrupts.h
+│   ├── pmm.h
+│   └── mm.h
+├── tools/                 # 交叉编译器
+├── nasm.exe               # 汇编器
+├── linker.ld              # 链接器脚本
+├── tinyos.bin             # 编译后的内核
+├── build_simple.bat       # 构建脚本
+└── run.bat                # 运行脚本
 ```
 
 ## 功能特性
 
 - ✅ Multiboot 兼容引导
-- ✅ 32位 x86 保护模式
+- ✅ 32位 x86 保护模式（GDT）
 - ✅ VGA 文本显示 (80x25, 16色)
-- ✅ 键盘输入支持
-- ✅ 定时器中断
-- ✅ 中断描述符表 (IDT)
+- ✅ VGA 状态栏（系统运行时间、堆使用量、空闲内存）
 - ✅ 硬件光标
+- ✅ 键盘输入（事件驱动）
+- ✅ 定时器中断（事件驱动）
+- ✅ 中断描述符表 (IDT)
+- ✅ 异常处理（除零等）
+- ✅ 物理内存管理（PMM，位图式页帧分配器）
+- ✅ 堆内存分配器（kmalloc/kfree，块式管理）
+- ✅ 交互式 Shell（多命令支持）
+- ✅ 串口调试输出
 
-## 修复记录
+## 技术支持
 
-### 键盘无法输入
-**原因**: 内核未初始化中断系统（IDT/PIC），键盘中断未被处理
-**修复**: 在 `kernel_main()` 中添加 `idt_initialize()`、`pic_initialize()`、`register_interrupt_handler()` 和 `enable_interrupts()`
+### 内存布局
+
+| 区域 | 地址 |
+|------|------|
+| 内核加载地址 | 0x100000 (1MB) |
+| 栈顶 | 0x108000 |
+| VGA 缓冲区 | 0xB8000 |
+| 内核堆 | PMM 动态分配 |
+
+### 构建工具链
+
+- **NASM**: 汇编器，编译 .asm 文件
+- **i686-elf-gcc**: 交叉编译器，编译 C 代码
+- **i686-elf-ld**: 链接器
+- **QEMU**: 模拟器，位于 `D:\Program Files\qemu`
 
 ## 许可证
 
