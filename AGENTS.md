@@ -93,3 +93,5 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - TSS 需要专用内核栈（非当前内核栈），避免中断时栈溢出
 - IRQ 的 IDT 门描述符 DPL 设为 3 (0xEE) 以允许用户态接收中断
 - 系统调用门 (int 0x80) DPL 设为 3 (0xEE) 以允许用户态触发
+- 在中断处理链中运行长时间逻辑（如 Snake 游戏）时，必须手动发送对应 IRQ 的 EOI (`outb(0x20, 0x20)`)，否则 PIC 会阻塞该 IRQ 的后续中断。正常 Shell 命令无此问题，因为回调立即返回，EOI 能正常发送；只有**劫持中断流程的长驻逻辑**才需手动 EOI
+- Snake 游戏采用中断驱动架构：`snake_tick`（IRQ0 回调）处理游戏逻辑，主循环负责渲染（通过 `needs_render` 标志）

@@ -299,6 +299,102 @@ qemu-system-i386 -kernel build/tinyos.bin -d int,cpu_reset
 
 ---
 
+## 问题12：贪吃蛇游戏键盘无响应
+
+### 现象
+运行 `snake` 命令后游戏画面正常显示，蛇会按初始方向自动移动，但：
+- 按方向键 / WASD 无法改变方向
+- 按 Q / ESC 无法退出游戏
+- 游戏完全无法操作
+
+### 根本原因
+**PIC 的 IRQ1 EOI 未发送，导致键盘中断被阻塞。**
+
+`snake_start()` 的调用链如下：
+```
+IRQ1 触发 → keyboard_handler() → char_callback('\n')
+  → shell_char_callback() → shell_handle_command("snake")
+    → snake_start(0)
+```
+
+当 IRQ1 触发时，PIC（可编程中断控制器）将 IRQ1 标记为 "In-Service"（ISR 位置位）。
+在发送 EOI（End of Interrupt）之前，PIC 不会再次递送 IRQ1——即使有新的键盘事件。
+
+由于 `snake_start()` 在中断处理函数内部运行其游戏主循环，而原始的 `keyboard_handler()`
+尚未返回（EOI 在 `irq_handler()` 末尾的 `pic_send_eoi()` 中发送），所以 IRQ1 始终被
+PIC 阻塞，键盘完全无响应。
+
+### 解决
+在 `snake_start()` 进入游戏循环之前，手动发送 IRQ1 的 EOI：
+```c
+// snake_start 被调用自 IRQ1 中断处理链中
+// 必须发送 EOI 让 PIC 允许新的键盘中断
+outb(0x20, 0x20);  // 向主 PIC 发送 EOI
+
+keyboard_register_raw_callback(snake_raw_cb);
+keyboard_register_char_callback(NULL);
+timer_register_tick_callback(snake_tick);
+
+render_all();
+enable_interrupts();  // sti
+
+while (running) {
+    asm volatile("hlt");
+    if (needs_render) {
+        needs_render = 0;
+        render_update();
+    }
+}
+```
+
+**额外优化：**
+- 将 `snake_tick` 中的渲染移到主循环（通过 `needs_render` 标志），避免在中断上下文中做大量 VGA 写入
+- `render_update()` 中补上 `draw_border()` 避免边框被擦除
+
+### 为什么正常 Shell 使用时没有问题？
+
+关键在于回调函数**是否立即返回**。
+
+**正常 Shell 操作：**
+```
+IRQ1 触发
+  → keyboard_handler()
+    → char_callback('a')
+      → shell_char_callback('a')   ← 打印一个字符，立即返回
+    → 返回
+  → pic_send_eoi(1)                ← EOI 正常发送 ✓
+  → iret                           ← 回到主循环
+```
+
+`shell_char_callback` 处理一个字符后在微秒级返回。IRQ 处理链正常完成，
+`irq_handler` 末尾的 `pic_send_eoi()` 被正常调用。PIC 清除 IRQ1 的
+“In-Service”位，下次按键可以正常触发中断。
+
+**贪吃蛇游戏：**
+```
+IRQ1 触发（用户输入 "snake" 后按回车）
+  → keyboard_handler()
+    → char_callback('\n')
+      → shell_char_callback('\n')
+        → shell_handle_command("snake")
+          → snake_start(0)
+            → while (running) {    ← 卡在这里，永远不返回！
+                hlt;
+              }
+```
+
+`snake_start` 在回调函数内部运行**整个游戏循环**，直到游戏结束才返回。
+因此 `keyboard_handler` 永不返回，`irq_handler` 永远到不了 `pic_send_eoi()`，
+PIC 始终将 IRQ1 标记为 "In-Service"——**无限期阻塞所有后续键盘中断**。
+
+### 经验教训
+> 1. 如果一个函数在中断处理链中启动长时间运行的逻辑（如游戏循环），必须确保对应 IRQ 的
+>    EOI 已经发送，否则 PIC 会阻塞该 IRQ 的后续中断。
+> 2. 正常 Shell 命令不会有此问题，因为回调立即返回，EOI 能正常发送。
+>    只有**劫持中断处理流程**的长驻逻辑才需要手动发送 EOI。
+
+---
+
 ## 问题11：启用分页后用户态程序无法运行
 
 ### 现象

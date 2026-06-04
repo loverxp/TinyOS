@@ -399,6 +399,72 @@ user/hello.c  +  user/crt0.s
 
 ---
 
+## 贪吃蛇游戏流程
+
+### 执行流程
+
+```
+Shell 命令 "snake"
+  │
+  └─ shell_handle_command()
+       │
+       └─ snake_start(0)              [kernel/shell.c]
+            │
+            ├─ 初始化游戏状态 (蛇位置、方向、食物)
+            │
+            ├─ outb(0x20, 0x20)      ← 发送 IRQ1 EOI！
+            │   └─ 必须：因为 snake_start 在 IRQ1 处理链中调用，
+            │      PIC 的 IRQ1 ISR 位仍然置位，不发送 EOI 则
+            │      后续键盘中断被阻塞
+            │
+            ├─ keyboard_register_raw_callback(snake_raw_cb)
+            │   └─ 注册原始扫描码回调（支持方向键）
+            ├─ keyboard_register_char_callback(NULL)
+            │   └─ 禁用字符回调（防止 Shell 处理输入）
+            ├─ timer_register_tick_callback(snake_tick)
+            │   └─ 注册定时器回调（每 10 tick = 200ms 移动蛇）
+            │
+            ├─ render_all()           ← 初始全屏渲染
+            ├─ enable_interrupts()    ← sti
+            │
+            └─ while (running) {       ← 游戏主循环
+                 hlt;                  ← 等待中断
+                 if (needs_render)
+                     render_update();  ← 增量渲染
+               }
+                 │
+                 ├─ 定时器中断 (IRQ0) 每 20ms:
+                 │   └─ timer_handler() → snake_tick()
+                 │       └─ 每 10 tick 移动蛇 + 设置 needs_render
+                 │
+                 ├─ 键盘中断 (IRQ1):
+                 │   └─ keyboard_handler() → snake_raw_cb()
+                 │       ├─ 方向键/WASD → 更新 next_dir
+                 │       └─ Q/ESC → running = 0
+                 │
+                 └─ 退出后:
+                     ├─ 取消注册回调
+                     ├─ keyboard_register_char_callback(shell_char_callback)
+                     └─ 恢复 Shell 提示符
+```
+
+### 关键设计要点
+
+1. **PIC EOI**: `snake_start` 在中断处理链中运行，必须手动发送 IRQ1 EOI
+2. **渲染分离**: `snake_tick`（中断上下文）只更新逻辑，主循环负责渲染
+3. **双重渲染保护**: 使用 `needs_render` 标志避免中断中做大量 VGA 写入
+
+### 为什么正常 Shell 不需要手动 EOI？
+
+正常 Shell 操作时，`shell_char_callback` 处理完一个字符后**立即返回**，
+IRQ 处理链正常结束，`irq_handler` 末尾的 `pic_send_eoi()` 会被执行。
+
+但 `snake_start` 在回调中启动了一个**永不返回的游戏主循环**，劫持了整个
+IRQ1 处理流程。`irq_handler` 永远到不了 `pic_send_eoi()`，PIC 的 IRQ1
+In-Service 位始终置位，后续所有键盘中断被阻塞。
+
+---
+
 ## 主循环流程
 
 ```c

@@ -152,7 +152,6 @@ isr_common_stub:
     
     popa            ; Pop all registers
     add esp, 8      ; Clean up error code and interrupt number
-    sti
     iret
 
 ; Common IRQ stub
@@ -187,7 +186,6 @@ irq_common_stub:
     
     popa            ; Pop all registers
     add esp, 8      ; Clean up error code and interrupt number
-    sti
     iret
 
 ; IDT load function

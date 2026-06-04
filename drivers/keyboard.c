@@ -7,6 +7,10 @@
 #define KEYBOARD_STATUS_PORT  0x64
 
 static keyboard_char_callback_t char_callback = NULL;
+static keyboard_raw_callback_t raw_callback = NULL;
+
+// Track 0xE0 extended prefix for arrow keys etc.
+static volatile int extended_prefix = 0;
 
 // US QWERTY keyboard scancode to ASCII mapping (set 1)
 static const char scancode_to_ascii[] = {
@@ -40,9 +44,35 @@ void keyboard_register_char_callback(keyboard_char_callback_t callback) {
     char_callback = callback;
 }
 
+void keyboard_register_raw_callback(keyboard_raw_callback_t callback) {
+    raw_callback = callback;
+    serial_string("[KBD] Raw callback registered: ");
+    serial_hex((uint32_t)callback >> 16);
+    serial_hex((uint32_t)callback & 0xFFFF);
+    serial_string("\n");
+}
+
 void keyboard_handler(void) {
     // Read scancode from keyboard
     uint8_t scancode = inb(KEYBOARD_DATA_PORT);
+
+    serial_string("[KBD] sc=0x");
+    serial_hex(scancode);
+    serial_string(" ext=");
+    serial_hex(extended_prefix ? 1 : 0);
+    serial_string("\n");
+
+    // Handle 0xE0 prefix (extended scancodes: arrow keys, etc.)
+    if (scancode == 0xE0) {
+        extended_prefix = 1;
+        return;
+    }
+
+    // Call raw callback if registered (for key press events only)
+    if (raw_callback && !(scancode & 0x80)) {
+        serial_string("[KBD] Calling raw callback\n");
+        raw_callback(scancode, extended_prefix);
+    }
 
     // Check if key release (bit 7 set)
     if (scancode & 0x80) {
@@ -64,6 +94,7 @@ void keyboard_handler(void) {
             }
         }
     }
+    extended_prefix = 0;
 }
 
 void keyboard_initialize(void) {
