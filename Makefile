@@ -31,11 +31,12 @@ BUILD = build
 # Source files
 C_SRCS    = kernel/kernel.c kernel/shell.c kernel/except.c kernel/gdt.c \
             kernel/tss.c kernel/pmm.c kernel/paging.c kernel/mm.c kernel/loader.c \
+            kernel/scheduler.c \
             drivers/vga.c drivers/keyboard.c drivers/timer.c drivers/interrupts.c \
             lib/string.c lib/stdio.c
 ASM_SRCS  = boot/boot.asm drivers/interrupts.asm drivers/gdt.asm \
             drivers/io.asm kernel/user.asm kernel/embedded_user.asm \
-            kernel/embedded_hello.asm
+            kernel/embedded_hello.asm kernel/switch.asm
 
 # Object files (all in build/; .asm -> _asm.o to avoid name collision with .c)
 C_OBJS    = $(patsubst %.c,$(BUILD)/%.o,$(notdir $(C_SRCS)))

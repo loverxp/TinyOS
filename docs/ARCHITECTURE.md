@@ -116,7 +116,12 @@ kernel_main()
 ├─> 12. 启用中断
 │   └─> enable_interrupts()  // sti 指令
 │
-└─> 13. 进入事件驱动主循环
+├─> 13. 初始化调度器
+│   └─> scheduler_init()
+│       └─> 创建 idle 任务（pid=0，state=RUNNING）
+│       └─> idle->next = idle（单节点循环链表）
+│
+└─> 14. 进入事件驱动主循环
     └─> while(1) { halt(); }  // 等待中断
 ```
 
@@ -147,8 +152,9 @@ kernel_main()
 ├─[11] 键盘初始化           IRQ1
 ├─[12] Shell 初始化         键盘回调绑定
 ├─[13] 启用中断             sti
+├─[14] 调度器初始化           idle 任务 + 循环链表
 │
-└─[14] 主循环              halt() 等待中断
+└─[15] 主循环              halt() 等待中断
 ```
 
 ---
@@ -418,6 +424,84 @@ user/gfxsnake.c + user/crt0.s
               │
               ▼ (链接)
        tinyos.bin
+```
+
+---
+
+## 多任务调度流程
+
+### 上下文切换（IRQ0 触发调度）
+
+```
+Task A 执行 hlt
+  │
+  ▼ IRQ0 触发 (每 20ms)
+irq_common_stub (interrupts.asm):
+  pusha; push ds; ...
+  call irq_handler
+    └─> timer_handler()
+         └─> need_reschedule = 1
+  add esp, 8
+  │
+  ├── cmp [need_reschedule], 0 → 需要调度
+  ├── mov [hook_esp], esp       ← 保存 Task A 的 IRQ 帧位置
+  ├── call prepare_switch        ← C 层选下一任务
+  │     ├─> current_task(A)->esp = hook_esp
+  │     ├─> A->state = READY
+  │     ├─> B->state = RUNNING
+  │     ├─> 首次运行: new_task_entry = entry
+  │     └─> return B->esp (EAX)
+  │
+  ├── push eax                   ← B 的 ESP 作为参数
+  ├── call do_switch             ← 汇编上下文切换
+  │     ├─> mov esp, [new_esp]   ← 切到 Task B 的栈
+  │     ├─> pop eax → DS/ES/FS/GS
+  │     ├─> popa                 ← 恢复通用寄存器
+  │     ├─> add esp, 8           ← 跳过 int_no/err_code
+  │     └─> iret                 ← 恢复 EIP/CS/EFLAGS
+  │           │
+  │           ├── 已运行任务 → 回到上次被中断处
+  │           └── 全新任务 → task_trampoline → jmp [new_task_entry]
+  │
+  add esp, 4  (Task A 下次被调度恢复时执行)
+```
+
+### 任务生命周期
+
+```
+task_create("name", entry)
+  │
+  ├─> pmm_alloc_page()           ← 分配 4KB 栈
+  ├─> 伪造 IRQ 帧到栈上           ← DS, pusha regs, int_no, err_code, EIP, CS, EFLAGS
+  ├─> EIP = task_trampoline      ← 首次 iret 跳转到 trampoline
+  ├─> entry 放在 EFLAGS 上方     ← trampoline 读取并跳转
+  └─> 插入循环链表 (current->next 之前)
+
+任务运行中:
+  └─> 每次 IRQ0 可能触发调度 → 保存/恢复上下文
+
+任务结束:
+  └─> task_exit()
+       ├─> state = TASK_FINISHED
+       ├─> need_reschedule = 1
+       └─> while(1) hlt          ← 等待下次 IRQ 切走（不再被调度）
+```
+
+### schedtest 命令
+
+```
+TinyOS> schedtest [N]    ← N 秒（默认 10，上限 300）
+  │
+  ├─> 设置 schedtest_deadline = timer_get_ticks() + N * 50
+  ├─> task_create("task_a", schedtest_a)
+  ├─> task_create("task_b", schedtest_b)
+  │
+  │   task_a: while (ticks < deadline) { printf("A "); hlt; }
+  │           → task_exit()
+  │   task_b: while (ticks < deadline) { printf("B "); hlt; }
+  │           → task_exit()
+  │
+  └─> Shell 继续响应（idle 参与轮换）
 ```
 
 ---
@@ -722,9 +806,16 @@ boot.asm
         │
         └─ irq_handler()        [interrupts.c]
             ├─ timer_handler()  [timer.c]
+            │   └─ need_reschedule = 1
             ├─ keyboard_handler() [keyboard.c]
             │   └─ inb() / outb() [io.asm]
             └─ pic_send_eoi()   [interrupts.c]
+
+    irq_common_stub 调度 hook (interrupts.asm):
+        ├─ prepare_switch()     [scheduler.c]
+        │   └─ scheduler_pick_next()
+        └─ do_switch()          [switch.asm]
+            └─ task_trampoline (新任务首次运行)
 
 系统调用 (int 0x80):
     user.asm (user_main, Ring 3)

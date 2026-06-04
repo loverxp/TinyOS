@@ -1,5 +1,6 @@
 #include "../include/timer.h"
 #include "../include/io.h"
+#include "../include/scheduler.h"
 
 // PIT ports
 #define PIT_COMMAND_PORT 0x43
@@ -40,6 +41,7 @@ void timer_register_tick_callback(void (*callback)(void)) {
 
 void timer_handler(void) {
     timer_ticks++;
+    need_reschedule = 1;
 
     // Fire tick callback every tick (for game loops)
     if (tick_callback) {

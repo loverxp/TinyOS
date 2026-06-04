@@ -19,6 +19,7 @@
 - 用户态（Ring 3）/ 内核态（Ring 0）切换
 - 交互式 Shell（多命令支持）
 - VGA 状态栏（系统运行时间、堆使用量、空闲内存）
+- 抢占式多任务调度器（Round-Robin，IRQ0 驱动，`schedtest` 命令验证）
 
 ---
 
@@ -117,31 +118,31 @@ struct page_directory_entry {
 ### 2.1 进程/线程管理
 **目标**：实现基本的抢占式多任务
 
-- [ ] **任务控制块 (TCB)**
-  ```c
-  struct task {
-      uint32_t pid;
-      uint32_t esp, ebp;
-      uint32_t eip;
-      uint32_t eax, ebx, ecx, edx;
-      uint32_t flags;
-      struct task* next;
-  };
-  ```
+- [x] **任务控制块 (TCB)**
+  - 循环链表 + 状态机 (READY/RUNNING/BLOCKED/FINISHED)
+  - 栈上伪造 IRQ 帧，无需单独保存 EBP/EIP
 
-- [ ] **上下文切换**
-  - 保存/恢复寄存器
-  - 切换页目录
-  - 切换内核栈
+- [x] **上下文切换**
+  - `prepare_switch()` (C) + `do_switch()` (汇编) + `task_trampoline`
+  - 基于 IRQ0 定时器中断抢占
+  - 内核线程共享页目录（无 CR3 切换）
 
-- [ ] **调度器**
-  - 时间片轮转 (Round Robin)
-  - 基于定时器中断 (IRQ0)
-  - 优先级调度（可选）
+- [x] **Round-Robin 调度器**
+  - 时间片轮转 (每个 timer tick 触发调度)
+  - idle 任务作为链表节点参与轮换
+  - `schedtest [N]` 命令验证（N 秒后自动停止）
+
+- [x] **task_exit()**
+  - 标记 FINISHED，等待下次 IRQ 切走
+  - 未释放栈内存、未从链表移除（已知限制）
+
+- [ ] **待完善**
+  - `task_exit()` 直接触发调度（避免死亡任务浪费 IRQ）
+  - FINISHED 任务从循环链表移除 + 释放栈页
+  - 任务函数意外返回的保护
 
 - [ ] **系统调用**
   - `fork()` - 创建进程
-  - `exit()` - 退出进程
   - `yield()` - 主动让出 CPU
   - `sleep()` - 睡眠等待
 
@@ -308,11 +309,11 @@ struct vfs_node {
 v0.1 ──> v0.15 ──> v0.2 ──> v0.3 ──> v0.4 ──> v0.5 ──> v0.6 ──> v0.7 ──> v0.8 ──> v0.9 ──> v1.0
  │        │         │         │         │         │         │         │         │         │
  ▼        ▼         ▼         ▼         ▼         ▼         ▼         ▼         ▼         ▼
-引导    构建系统   内存管理   异常处理   多任务    调度器    VFS      用户态    网络
-VGA     GDB调试   分页机制   printf    TCB      系统调用   RAMFS    crt0      GUI
-键盘    调试框架   堆分配器  蓝屏      上下文    同步     FAT12    libc      TCP/IP
+引导    构建系统   内存管理   异常处理   多任务✓   调度器✓   VFS      用户态    网络
+VGA     GDB调试   分页机制   printf    TCB✓     系统调用   RAMFS    crt0      GUI
+键盘    调试框架   堆分配器  蓝屏      上下文✓   同步     FAT12    libc      TCP/IP
 定时器   RTC驱动              栈回溯    IPC       锁      IDE       ELF加载  信号
-用户态   鼠标                              Spinlock           二进制加载  ACPI
+用户态   鼠标                            Spinlock           二进制加载  ACPI
 系统调用  PCI                              Mutex               用户程序   SMP
 ```
 
@@ -327,7 +328,7 @@ VGA     GDB调试   分页机制   printf    TCB      系统调用   RAMFS    cr
 | v0.15 | Makefile + GDB 调试 | `make qemu-gdb` 断点命中 |
 | v0.2 | kmalloc/kfree 工作 | 分配内存并读写测试 |
 | v0.3 | 页故障正确处理 | 访问无效地址触发蓝屏 |
-| v0.4 | 两个任务交替运行 | 任务A和B轮流打印 |
+| v0.4 | 两个任务交替运行 | `schedtest` 命令验证 A B 交替 |
 | v0.5 | 系统调用正常工作 | 用户程序调用 `write()` |
 | v0.6 | 文件读写正常 | `echo hello > file.txt` |
 | v0.7 | 磁盘分区可挂载 | `mount /dev/hda1 /mnt` |

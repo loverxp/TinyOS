@@ -10,6 +10,7 @@
 #include "../include/tss.h"
 #include "../include/paging.h"
 #include "../include/stdio.h"
+#include "../include/scheduler.h"
 
 // User mode entry points (from user.asm)
 extern void run_user_task(void (*entry)(void));
@@ -126,6 +127,9 @@ void kernel_main(uint32_t multiboot_info_addr) {
     enable_interrupts();
     printf("[OK] Interrupts enabled\n\n");
     serial_string("[OK] Interrupts enabled\n");
+
+    scheduler_init();
+    serial_string("[OK] Scheduler\n");
 
     printf("Type 'help' for available commands.\n\n");
 

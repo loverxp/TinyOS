@@ -2,6 +2,10 @@
 
 extern isr_handler
 extern irq_handler
+extern prepare_switch
+extern do_switch
+extern need_reschedule
+extern hook_esp
 
 ; ISR macro - creates a stub for ISRs without error code
 %macro ISR_NOERRCODE 1
@@ -177,15 +181,149 @@ irq_common_stub:
     push ebx              ; Push IRQ number
     call irq_handler
     add esp, 8            ; Clean up 2 parameters
-    
+
+    ; ── Scheduler hook ──
+    cmp byte [need_reschedule], 0
+    je .no_schedule
+    mov byte [need_reschedule], 0
+    mov [hook_esp], esp    ; Save ESP at this point (pusha frame top)
+    call prepare_switch    ; Returns new task's ESP in EAX (0 = no switch)
+    test eax, eax
+    jz .no_schedule
+    push eax               ; Push new_esp as argument for do_switch
+    call do_switch          ; Switches ESP, returns on new task's stack
+    add esp, 4              ; Clean up do_switch argument
+.no_schedule:
+    ; ── End scheduler hook ──
+
+    ; ── Debug: dump pre-iret state to serial ──
+    push eax
+    push edx
+    mov edx, 0x3F8
+.dbg_w1:
+    in al, 0x3FD
+    test al, 0x20
+    jz .dbg_w1
+    mov al, 0x3C        ; '<'
+    out dx, al
+.dbg_w2:
+    in al, 0x3FD
+    test al, 0x20
+    jz .dbg_w2
+    mov al, 0x49        ; 'I'
+    out dx, al
+.dbg_w3:
+    in al, 0x3FD
+    test al, 0x20
+    jz .dbg_w3
+    mov al, 0x3E        ; '>'
+    out dx, al
+    pop edx
+    pop eax
+    ; ── End debug ──
+
     pop eax         ; Restore data segment
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
-    
+
+    ; ── Debug: after segment restore ──
+    push eax
+    push edx
+    mov edx, 0x3F8
+.dbg_s1:
+    in al, 0x3FD
+    test al, 0x20
+    jz .dbg_s1
+    mov al, 0x53        ; 'S'
+    out dx, al
+    pop edx
+    pop eax
+    ; ── End debug ──
+
     popa            ; Pop all registers
+
+    ; ── Debug: after popa ──
+    push eax
+    push edx
+    mov edx, 0x3F8
+.dbg_p1:
+    in al, 0x3FD
+    test al, 0x20
+    jz .dbg_p1
+    mov al, 0x50        ; 'P'
+    out dx, al
+    pop edx
+    pop eax
+    ; ── End debug ──
+
     add esp, 8      ; Clean up error code and interrupt number
+
+    ; ── Debug: dump EIP from iret frame (at [ESP+0] now) and print 'R' ──
+    push eax
+    push edx
+    push ecx
+    mov ecx, [esp + 12]  ; EIP (above the 3 saved regs: eax/edx/ecx = 12 bytes)
+    mov edx, 0x3F8
+    ; Print 8 hex digits of EIP
+    mov al, 0x45         ; 'E'
+.dbg_reip_w:
+    in al, 0x3FD
+    test al, 0x20
+    jz .dbg_reip_w
+    mov al, 0x45
+    out dx, al
+.dbg_reip_i:
+    in al, 0x3FD
+    test al, 0x20
+    jz .dbg_reip_i
+    mov al, 0x49         ; 'I'
+    out dx, al
+.dbg_reip_p:
+    in al, 0x3FD
+    test al, 0x20
+    jz .dbg_reip_p
+    mov al, 0x50         ; 'P'
+    out dx, al
+.dbg_reip_eq:
+    in al, 0x3FD
+    test al, 0x20
+    jz .dbg_reip_eq
+    mov al, 0x3D         ; '='
+    out dx, al
+    ; Now print EIP in hex
+    mov eax, ecx
+    mov cl, 28
+.dbg_reip_loop:
+    in al, 0x3FD
+    test al, 0x20
+    jz .dbg_reip_loop
+    mov eax, ecx
+    shr eax, cl
+    and al, 0x0F
+    cmp al, 10
+    jl .dbg_reip_digit
+    add al, 0x37         ; 'A' - 10
+    jmp .dbg_reip_out
+.dbg_reip_digit:
+    add al, 0x30         ; '0'
+.dbg_reip_out:
+    out dx, al
+    sub cl, 4
+    jnc .dbg_reip_loop
+    ; Print newline
+.dbg_reip_nl1:
+    in al, 0x3FD
+    test al, 0x20
+    jz .dbg_reip_nl1
+    mov al, 0x0A
+    out dx, al
+    pop ecx
+    pop edx
+    pop eax
+    ; ── End debug ──
+
     iret
 
 ; IDT load function

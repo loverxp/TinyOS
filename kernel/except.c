@@ -33,7 +33,8 @@ void exception_handler(uint32_t int_no, uint32_t err_code) {
     }
 
     vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    printf("    System continues...\n");
+    printf("    System halted.\n");
+    while (1) { asm volatile("cli; hlt"); }
 }
 
 void exceptions_init(void) {

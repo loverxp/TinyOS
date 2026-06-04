@@ -38,7 +38,7 @@ nasm -f elf32 kernel/embedded_user.asm -o build/embedded_user_asm.o
 i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c <file.c> -o <file.o>
 
 # 链接
-i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/interrupts_asm.o build/gdt_asm.o build/gdt.o build/tss.o build/io_asm.o build/kernel.o build/except.o build/shell.o build/pmm.o build/mm.o build/user_asm.o build/vga.o build/keyboard.o build/timer.o build/interrupts_c.o build/string.o build/stdio.o build/loader.o build/embedded_user_asm.o
+i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/interrupts_asm.o build/gdt_asm.o build/gdt.o build/tss.o build/io_asm.o build/kernel.o build/except.o build/shell.o build/pmm.o build/mm.o build/user_asm.o build/vga.o build/keyboard.o build/timer.o build/interrupts_c.o build/string.o build/stdio.o build/loader.o build/scheduler.o build/switch_asm.o build/embedded_user_asm.o build/embedded_hello_asm.o
 
 ### 运行
 ```batch
@@ -47,7 +47,7 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 
 ## 项目结构
 - `boot/`: 启动代码
-- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, mm.c, except.c, loader.c, embedded_user.asm, user.asm）
+- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, mm.c, except.c, loader.c, scheduler.c, embedded_user.asm, user.asm, switch.asm）
 - `user/`: 用户程序（crt0.s, hello.c, user.ld, build.bat）
 - `drivers/`: 设备驱动（VGA、键盘、定时器、中断、GDT、I/O）
 - `lib/`: 库函数（字符串处理、printf/sprintf 格式化输出）
@@ -63,7 +63,10 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - `kernel/user.asm`: 用户态入口、Ring 3 切换及退出（含自定义栈版本 `run_user_task_ex`）
 - `kernel/loader.c`: 用户程序加载器，拷贝二进制到 0x400000，分配栈，执行
 - `kernel/embedded_user.asm`: 使用 `incbin` 嵌入用户程序二进制
-- `drivers/interrupts.c` / `drivers/interrupts.asm`: 中断处理
+- `kernel/scheduler.c`: 抢占式 Round-Robin 调度器（TCB、prepare_switch、task_create、task_exit）
+- `kernel/switch.asm`: 上下文切换汇编（do_switch、task_trampoline）
+- `include/scheduler.h`: 调度器 API（task_t、task_create、prepare_switch、task_exit）
+- `drivers/interrupts.c` / `drivers/interrupts.asm`: 中断处理（irq_common_stub 含调度 hook）
 - `kernel/pmm.c`: 物理内存管理器（位图分配）
 - `kernel/mm.c`: 堆内存分配器（kmalloc/kfree）
 - `lib/stdio.c`: printf/sprintf 格式化输出实现
@@ -95,6 +98,8 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - 系统调用门 (int 0x80) DPL 设为 3 (0xEE) 以允许用户态触发
 - 在中断处理链中运行长时间逻辑（如 Snake 游戏）时，必须手动发送对应 IRQ 的 EOI (`outb(0x20, 0x20)`)，否则 PIC 会阻塞该 IRQ 的后续中断。正常 Shell 命令无此问题，因为回调立即返回，EOI 能正常发送；只有**劫持中断流程的长驻逻辑**才需手动 EOI
 - Snake 游戏采用中断驱动架构：`snake_tick`（IRQ0 回调）处理游戏逻辑，主循环负责渲染（通过 `needs_render` 标志）
+- **多任务调度器**: 抢占式 Round-Robin，IRQ0 每次 tick 设置 `need_reschedule=1`，`irq_common_stub` 在 EOI 后调用 `prepare_switch()` + `do_switch()` 完成上下文切换。idle 任务（主循环）作为循环链表节点参与轮换
+- **schedtest 命令**: `schedtest [N]` 创建两个测试线程交替打印 A/B，N 秒后自动退出（默认 10 秒，上限 300 秒）。任务通过 `task_exit()` 标记 FINISHED
 - **gfxsnake**: 新版 VGA Mode 13h 像素模式贪吃蛇，作为用户程序在 Ring 3 运行，使用系统调用切换视频模式和读取输入
 - **VGA 字模恢复机制**: Mode 13h (chain-4) 写入 `0xA0000` 时会破坏 VGA plane 2 的字体数据。内核在开机时调用 `vga_save_font()` 保存 4096 字节字模到缓冲区，切换回文本模式时由 `vga_set_mode03h()` 调用 `vga_restore_font()` 恢复
 - **VGA Mode 13h 初始化顺序**: Misc Output → Sequencer (复位→编程→释放) → Graphics Controller → CRTC (解锁→编程→上锁) → Attribute Controller (编程→重新使能) → DAC 调色板。顺序错误会导致黑屏或花屏

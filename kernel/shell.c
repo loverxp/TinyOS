@@ -10,6 +10,7 @@
 #include "../include/paging.h"
 #include "../include/interrupts.h"
 #include "../include/io.h"
+#include "../include/scheduler.h"
 
 #define LINE_BUF_SIZE 256
 
@@ -336,6 +337,47 @@ static uint32_t parse_hex(const char* s) {
     return val;
 }
 
+// Deadline tick (absolute timer tick count) for schedtest tasks.
+// When timer_get_ticks() >= this value, tasks call task_exit().
+static volatile uint32_t schedtest_deadline = 0;
+
+static void schedtest_a(void) {
+    while (timer_get_ticks() < schedtest_deadline) {
+        printf("A ");
+        asm volatile("hlt");
+    }
+    printf("\n[task_a] Time's up, exiting.\n");
+    task_exit();
+}
+
+static void schedtest_b(void) {
+    while (timer_get_ticks() < schedtest_deadline) {
+        printf("B ");
+        asm volatile("hlt");
+    }
+    printf("\n[task_b] Time's up, exiting.\n");
+    task_exit();
+}
+
+static void cmd_schedtest(const char* args) {
+    // Parse optional duration in seconds (default 10s)
+    uint32_t duration = 10;
+    if (args && *args >= '0' && *args <= '9') {
+        duration = 0;
+        while (*args >= '0' && *args <= '9') {
+            duration = duration * 10 + (*args++ - '0');
+        }
+        if (duration == 0) duration = 1;
+        if (duration > 300) duration = 300;  // cap at 5 minutes
+    }
+    // Timer runs at 50 Hz
+    schedtest_deadline = timer_get_ticks() + duration * 50;
+    printf("Starting scheduler test (A/B tasks) for %u seconds...\n", duration);
+    task_create("task_a", schedtest_a);
+    task_create("task_b", schedtest_b);
+    printf("Tasks created. They will auto-stop after %u seconds.\n", duration);
+}
+
 static void shell_handle_command(const char* cmd) {
     // Skip leading spaces
     while (*cmd == ' ') cmd++;
@@ -359,6 +401,7 @@ static void shell_handle_command(const char* cmd) {
             printf("  snake      - Play Snake game (text mode)\n");
             printf("  gfxsnake   - Play Snake game (pixel graphics mode)\n");
             printf("  hello      - Run hello user program\n");
+            printf("  schedtest [N]- Start scheduler test for N seconds (default 10)\n");
     } else if (strcmp(cmd, "clear") == 0) {
         vga_clear_screen(VGA_COLOR_BLACK);
         vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
@@ -431,6 +474,10 @@ static void shell_handle_command(const char* cmd) {
         test_user_mode();
     } else if (strcmp(cmd, "hello") == 0) {
         run_hello_user();
+    } else if (strncmp(cmd, "schedtest", 9) == 0) {
+        const char* args = cmd + 9;
+        while (*args == ' ') args++;
+        cmd_schedtest(*args ? args : NULL);
     } else {
         printf("Unknown command: %s\n", cmd);
         printf("Type 'help' for available commands.\n");
