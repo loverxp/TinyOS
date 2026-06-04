@@ -381,7 +381,7 @@ runuser 命令
 ### 用户程序构建流程
 
 ```
-user/hello.c  +  user/crt0.s
+user/hello.c  +  user/crt0.s  +  user/libc/*.c
        │
        ├─ i686-elf-gcc (编译为 .o)
        ├─ i686-elf-ld -T user.ld (链接为 ELF)
@@ -389,6 +389,24 @@ user/hello.c  +  user/crt0.s
               │
               ▼
        build/user/hello.bin
+              │
+              ▼ (incbin 嵌入)
+       kernel/embedded_hello.asm
+              │
+              ▼ (编译)
+       build/embedded_hello_asm.o
+              │
+              ▼ (链接)
+       tinyos.bin
+       
+user/gfxsnake.c + user/crt0.s
+       │
+       ├─ i686-elf-gcc (编译为 .o)
+       ├─ i686-elf-ld -T user.ld (链接为 ELF)
+       └─ i686-elf-objcopy -O binary (转为纯二进制)
+              │
+              ▼
+       build/user/gfxsnake.bin
               │
               ▼ (incbin 嵌入)
        kernel/embedded_user.asm
@@ -724,12 +742,13 @@ boot.asm
                     └─ syscall 0 → 返回 Ring 0
                         └─ user_exit_handler → 回到 kernel.c
 
-用户程序加载 (runuser):
-    shell.c (runuser 命令)
-        └─ run_loaded_user() [loader.c]
+用户程序加载 (runuser / hello):
+    shell.c (runuser / hello 命令)
+        ├─ run_loaded_user() [loader.c]   ← 加载 gfxsnake.bin
+        └─ run_hello_user() [loader.c]    ← 加载 hello.bin
             ├─ pmm_alloc_page() [pmm.c]     ← 分配用户栈
-            ├─ memcpy() [string.c]
-            ├─ printf() [stdio.c]            ← 输出加载信息
+            ├─ memcpy() [string.c]          ← 复制二进制到 0x400000
+            ├─ printf() [stdio.c]           ← 输出加载信息
             └─ run_user_task_ex() [user.asm] ← 自定义栈入口
                 └─ iret → Ring 3
                     └─ (USER_PROG_BASE = 0x400000)

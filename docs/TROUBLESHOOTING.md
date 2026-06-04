@@ -553,3 +553,61 @@ for (int i = 0; i < 16; i++) {
 待排查。可能原因：
 - 用户程序栈页面未正确释放（`pmm_free_page` 后 PMM 位图状态不一致）
 - 物理内存管理器的位图分配/释放逻辑问题
+
+---
+
+## 问题15：用户程序 hello 输出被清除
+
+### 现象
+运行 `hello` 命令后，用户程序输出的 "Hello from user mode!" 和 "Running in Ring 3 via libc" 不可见，只显示 "Return to kernel mode" 或 "Hello program finished, back in kernel mode."
+
+### 根本原因
+**`vga_set_mode03h()` 的清屏逻辑破坏了 VGA 文本缓冲区内容。**
+
+hello 程序通过 syscall 7 调用 `vga_writestring()` 将输出写入 VGA 文本缓冲区（0xB8000）。当 hello 调用 `exit(0)`（syscall 0）时，内核的 syscall 处理函数调用 `vga_set_mode03h()` 恢复文本模式，该函数末尾有清屏代码（循环写入 0x0720 覆盖 80×25 个字符），直接抹掉了 hello 的所有输出。
+
+随后 `vga_writestring("*** Return to kernel mode ***")` 写入的"Return"消息虽然可见，但 hello 的原始输出已不复存在。
+
+### 解决
+1. **移除 `vga_set_mode03h()` 中的清屏操作**：将清屏的责任交给调用者。`vga_set_mode03h()` 只负责 VGA 寄存器恢复和字模恢复，不清除文本缓冲区。
+2. **简化 `loader.c` 中的 `run_hello_user()`**：不再调用 `vga_initialize()`（其内部会清屏），而是仅设置光标位置和颜色，保留 VGA 缓冲区的已有内容。
+
+### 涉及文件
+- `drivers/interrupts.c`: `vga_set_mode03h()` — 移除末尾的清屏代码
+- `kernel/loader.c`: `run_hello_user()` — 用 `vga_set_cursor()` + `vga_set_color()` 替代 `vga_initialize()`
+
+### 验证
+运行 `hello` 后能看到完整的输出链：
+```
+Hello from user mode!
+Running in Ring 3 via libc
+*** Return to kernel mode ***
+Hello program finished, back in kernel mode.
+```
+
+---
+
+## 搁置问题：gfxsnake 信息区显示乱码
+
+### 现象
+运行 `gfxsnake` 后游戏可正常游玩，但屏幕上方的信息区（状态栏）显示乱码，而非预期的文字（如 "SNAKE" 标题、分数等）。
+
+### 根本原因
+待排查。可能原因：
+- 像素字体渲染函数（`draw_digit`、`draw_number`、`draw_status`）中使用的位图数据在 `uint16_t` 转换时溢出。原始代码使用 17 位二进制字面量（如 `0b11101010101010111`），赋值给 `uint16_t` 时高位被截断，导致数字渲染数据错误。
+- DAC 调色板索引与实际使用的颜色值不匹配，导致像素颜色显示异常。
+
+### 状态
+搁置，待后续修复。gfxsnake 整体可玩，不影响核心功能。
+
+---
+
+## 搁置问题：退出 gfxsnake 后无法再次进入
+
+### 现象
+第一次运行 `gfxsnake` 正常，退出后再次输入 `gfxsnake` 输出"用户栈分配失败"（`pmm_alloc_page()` 返回 NULL）。
+
+### 状态
+搁置，待排查。可能原因：
+- 用户程序栈页面未正确释放（`pmm_free_page` 后 PMM 位图状态不一致）
+- 物理内存管理器的位图分配/释放逻辑问题

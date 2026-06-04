@@ -15,6 +15,10 @@ extern void run_user_task_ex(void (*entry)(void), void* user_esp);
 extern uint8_t embedded_user_start[];
 extern uint8_t embedded_user_end[];
 
+// Embedded hello binary (from embedded_hello.asm)
+extern uint8_t embedded_hello_start[];
+extern uint8_t embedded_hello_end[];
+
 // External assembly functions
 extern void vga_initialize(void);
 extern void vga_set_color(enum vga_color fg, enum vga_color bg);
@@ -100,6 +104,53 @@ void run_loaded_user(void) {
     vga_clear_screen(VGA_COLOR_BLACK);
     
     printf("\nUser program finished, back in kernel mode.\n");
+    
+    // Reinitialize shell
+    shell_init();
+}
+
+void run_hello_user(void) {
+    uint32_t size = embedded_hello_end - embedded_hello_start;
+    
+    if (size == 0) {
+        printf("ERROR: hello.bin is empty!\n");
+        return;
+    }
+    
+    printf("Loading hello (%u bytes) to 0x%x...\n", size, USER_PROG_BASE);
+    
+    // Copy program binary to target address
+    memcpy((void*)USER_PROG_BASE, embedded_hello_start, size);
+    
+    // Allocate a page for user stack (4KB)
+    void* user_stack = pmm_alloc_page();
+    if (!user_stack) {
+        printf("ERROR: Failed to allocate user stack!\n");
+        return;
+    }
+    
+    uint32_t user_esp = (uint32_t)user_stack + 4096;
+    
+    // Send EOI for IRQ1
+    outb(0x20, 0x20);
+    
+    // Run the user program with custom stack
+    run_user_task_ex((void (*)(void))USER_PROG_BASE, (void*)user_esp);
+    
+    // Restore VGA text mode (preserves existing VGA text buffer content)
+    vga_set_mode03h();
+    
+    // Free the user stack page
+    pmm_free_page(user_stack);
+    
+    // Initialize VGA driver state without clearing the screen
+    vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    // Move cursor to first free line after the user program's output
+    size_t crow = vga_get_cursor_row();
+    if (crow < VGA_HEIGHT - 2) crow++;
+    vga_set_cursor(crow, 0);
+
+    printf("\nHello program finished, back in kernel mode.\n");
     
     // Reinitialize shell
     shell_init();

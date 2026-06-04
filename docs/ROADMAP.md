@@ -238,23 +238,20 @@ struct vfs_node {
 ### 4.3 用户态标准库 (libc)
 **目标**：提供基础 C 运行时，用户程序无需关心内核细节
 
-- [ ] **系统调用封装**
-  - `syscall(n, args...)` 通用接口（`int 0x80`）
+- [x] **系统调用封装**
   - `exit(code)` - 通过 syscall 0 退出
-  - `write(fd, buf, len)` - 输出到控制台
-- [ ] **内存管理**
-  - `malloc(size)` / `free(ptr)` - 通过 syscall 申请更多堆内存
-  - `calloc(n, size)` - 清零分配
-- [ ] **字符串处理**
+  - `printf(fmt, ...)` - 通过 syscall 7 输出到控制台
+- [x] **字符串处理**
   - `strlen`, `strcpy`, `strcmp`, `strcat`
   - `memcpy`, `memset`, `memcmp`
-- [ ] **格式化输出**
-  - `printf(fmt, ...)` - 基于 `write()` 实现
+- [x] **格式化输出**
+  - `printf(fmt, ...)` - 基于 syscall 7 实现
   - `sprintf(buf, fmt, ...)` - 格式化到字符串
   - 支持 `%d`, `%x`, `%s`, `%c`, `%p`
-- [ ] **用户程序入口**
-  - `__libc_startup` 调用 `main(argc, argv)`
-  - `__libc_exit(code)` 清理退出
+- [ ] **待扩展**
+  - `malloc(size)` / `free(ptr)` - 堆分配器
+  - `write(fd, buf, len)` - 文件 I/O
+  - `scanf` - 格式化输入
 
 ---
 
@@ -288,7 +285,7 @@ struct vfs_node {
   - 320x200x256 (Mode 13h)
   - 或 VESA 高分辨率
 
-- [x] **窗口系统**
+- [ ] **窗口系统**
   - 窗口管理器
   - 事件驱动（鼠标、键盘）
   - 基本控件（按钮、标签、文本框）

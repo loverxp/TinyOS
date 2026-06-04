@@ -5,7 +5,7 @@
 
 #include "../include/types.h"
 
-// ── Syscall wrappers ──────────────────────────────────────────────
+// ══ Syscall wrappers ════════════════════════════════════════
 
 static void sys_exit(int code) {
     asm volatile("mov $0, %%eax; int $0x80" : : "b"(code) : "eax", "memory");
@@ -19,7 +19,7 @@ static uint32_t sys_get_ticks(void) {
 
 static uint32_t sys_read_key(void) {
     uint32_t key;
-    asm volatile("mov $3, %%eax; int $0x80" : "=a"(key) : : "memory");
+    asm volatile("mov $3, %%eax; int $0x80" : "=a"(key) : : "memory"); 
     return key;
 }
 
@@ -28,14 +28,14 @@ static void sys_set_video_mode(int mode) {
 }
 
 static void sys_clear_keybuf(void) {
-    asm volatile("mov $5, %%eax; int $0x80" : : : "eax", "memory");
+    asm volatile("mov $5, %%eax; int $0x80" : : : "eax", "memory");    
 }
 
 static void sys_debug(const char* msg) {
     asm volatile("mov $6, %%eax; int $0x80" : : "b"(msg) : "eax", "memory");
 }
 
-// ── VGA Mode 13h direct access ────────────────────────────────────
+// ══ VGA Mode 13h direct access ═════════════════════════════
 // IOPL=3 allows in/out, paging maps 0xA0000 as user-accessible.
 
 #define SCREEN_W    320
@@ -44,7 +44,7 @@ static void sys_debug(const char* msg) {
 
 static volatile uint8_t* const vram = (uint8_t*)VRAM_ADDR;
 
-// ── Game constants ────────────────────────────────────────────────
+// ══ Game constants ══════════════════════════════════════════
 
 #define CELL_SIZE   4       // each grid cell is 4x4 pixels
 #define GRID_W      (SCREEN_W / CELL_SIZE)   // 80
@@ -65,11 +65,11 @@ static volatile uint8_t* const vram = (uint8_t*)VRAM_ADDR;
 #define COL_ORANGE     13
 
 enum { DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT };
-enum { KEY_NONE, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_QUIT };
+enum { KEY_NONE, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_QUIT };    
 
 typedef struct { int x, y; } pos_t;
 
-// ── Game state ────────────────────────────────────────────────────
+// ══ Game state ══════════════════════════════════════════════
 
 static pos_t snake[MAX_LEN];
 static int snake_len;
@@ -81,7 +81,7 @@ static int game_over;
 static int running;
 static uint32_t last_move_tick;
 
-// ── Helpers ───────────────────────────────────────────────────────
+// ══ Helpers ═════════════════════════════════════════════════
 
 static void draw_pixel(int x, int y, uint8_t color) {
     if (x >= 0 && x < SCREEN_W && y >= 0 && y < SCREEN_H)
@@ -101,13 +101,13 @@ static void clear_screen(uint8_t color) {
         vram[i] = color;
 }
 
-// ── Random ────────────────────────────────────────────────────────
+// ══ Random ══════════════════════════════════════════════════
 
 static int rand_range(int min, int max) {
     static uint32_t seed = 0;
     if (seed == 0) seed = sys_get_ticks() + 1;
     seed = seed * 1103515245 + 12345;
-    return min + (int)((seed >> 16) % (uint32_t)(max - min + 1));
+    return min + (int)((seed >> 16) % (uint32_t)(max - min + 1));      
 }
 
 static int is_snake_cell(int x, int y) {
@@ -132,9 +132,9 @@ static void spawn_food(void) {
             if (!is_snake_cell(x, y)) { food_x = x; food_y = y; return; }
 }
 
-// ── Digit drawing (pixel font: 3x5 digits 0-9) ────────────────────
+// ══ Digit drawing (pixel font: 3x5 digits 0-9) ═════════════
 
-// Each digit defined as 3 columns x 5 rows of bits (lsb = top)
+// Each digit defined as 3 columns x 5 rows of bits (lsb = top)        
 static const uint16_t digit_data[10] = {
     0b11101010101010111,  // 0
     0b01001001001001001,  // 1
@@ -159,7 +159,7 @@ static void draw_digit(int px, int py, int d, uint8_t color) {
     }
 }
 
-static void draw_number(int px, int py, int n, uint8_t color) {
+static void draw_number(int px, int py, int n, uint8_t color) {        
     if (n == 0) {
         draw_digit(px, py, 0, color);
         return;
@@ -176,7 +176,7 @@ static void draw_number(int px, int py, int n, uint8_t color) {
     }
 }
 
-// ── Drawing ───────────────────────────────────────────────────────
+// ══ Drawing ═════════════════════════════════════════════════
 
 static void draw_border(void) {
     int px0 = GRID_X0 * CELL_SIZE;
@@ -201,7 +201,7 @@ static void draw_snake(void) {
 }
 
 static void draw_food(void) {
-    // Draw food as a blinking red square with yellow dot in center
+    // Draw food as a blinking red square with yellow dot in center    
     int px = food_x * CELL_SIZE;
     int py = food_y * CELL_SIZE;
     for (int dy = 0; dy < CELL_SIZE; dy++)
@@ -224,7 +224,7 @@ static void draw_status(void) {
     uint8_t c = COL_WHITE;
     // S
     int sy = 3;
-    draw_pixel(5, sy, c); draw_pixel(6, sy, c); draw_pixel(7, sy, c);
+    draw_pixel(5, sy, c); draw_pixel(6, sy, c); draw_pixel(7, sy, c);  
     draw_pixel(5, sy+1, c);
     draw_pixel(5, sy+2, c); draw_pixel(6, sy+2, c); draw_pixel(7, sy+2, c);
     draw_pixel(7, sy+3, c);
@@ -249,8 +249,8 @@ static void draw_status(void) {
 
 static void draw_game_over(void) {
     // Dark overlay
-    for (int y = SCREEN_H / 2 - 24; y < SCREEN_H / 2 + 24; y++)
-        for (int x = SCREEN_W / 2 - 80; x < SCREEN_W / 2 + 80; x++)
+    for (int y = SCREEN_H / 2 - 24; y < SCREEN_H / 2 + 24; y++)        
+        for (int x = SCREEN_W / 2 - 80; x < SCREEN_W / 2 + 80; x++)    
             vram[y * SCREEN_W + x] = COL_BLACK;
     // "GAME OVER" text made of blocks
     int ox = SCREEN_W / 2 - 60;
@@ -258,14 +258,14 @@ static void draw_game_over(void) {
     uint8_t col = COL_RED;
 
     // G
-    for (int row = 0; row < 5; row++) draw_pixel(ox+1, oy+row, col);
+    for (int row = 0; row < 5; row++) draw_pixel(ox+1, oy+row, col);   
     draw_pixel(ox+2, oy, col); draw_pixel(ox+3, oy, col);
     draw_pixel(ox+3, oy+2, col); draw_pixel(ox+3, oy+3, col);
     draw_pixel(ox+2, oy+3, col);
     // A
     int ax = ox + 8;
     for (int row = 0; row < 5; row++) { draw_pixel(ax, oy+row, col); draw_pixel(ax+3, oy+row, col); }
-    for (int col2 = 0; col2 < 4; col2++) draw_pixel(ax+col2, oy, col);
+    for (int col2 = 0; col2 < 4; col2++) draw_pixel(ax+col2, oy, col); 
     for (int col2 = 0; col2 < 4; col2++) draw_pixel(ax+col2, oy+2, col);
     // M
     int mx = ax + 8;
@@ -273,8 +273,8 @@ static void draw_game_over(void) {
     draw_pixel(mx+1, oy+1, col); draw_pixel(mx+2, oy+2, col); draw_pixel(mx+3, oy+1, col);
     // E
     int ex = mx + 8;
-    for (int row = 0; row < 5; row++) draw_pixel(ex, oy+row, col);
-    for (int col2 = 0; col2 < 4; col2++) { draw_pixel(ex+col2, oy, col); draw_pixel(ex+col2, oy+2, col); draw_pixel(ex+col2, oy+4, col); }
+    for (int row = 0; row < 5; row++) draw_pixel(ex, oy+row, col);     
+    for (int col2 = 0; col2 < 4; col2++) { draw_pixel(ex+col2, oy, col); draw_pixel(ex+col2, oy+2, col); draw_pixel(ex+col2, oy+4, col); }    
 
     // O
     ox = SCREEN_W / 2 + 16;
@@ -287,11 +287,11 @@ static void draw_game_over(void) {
     draw_pixel(vx+1, oy+3, col); draw_pixel(vx+2, oy+3, col);
     // E
     int ey2 = vx + 8;
-    for (int row = 0; row < 5; row++) draw_pixel(ey2, oy+row, col);
-    for (int col2 = 0; col2 < 4; col2++) { draw_pixel(ey2+col2, oy, col); draw_pixel(ey2+col2, oy+2, col); draw_pixel(ey2+col2, oy+4, col); }
+    for (int row = 0; row < 5; row++) draw_pixel(ey2, oy+row, col);    
+    for (int col2 = 0; col2 < 4; col2++) { draw_pixel(ey2+col2, oy, col); draw_pixel(ey2+col2, oy+2, col); draw_pixel(ey2+col2, oy+4, col); } 
     // R
     int rx = ey2 + 8;
-    for (int row = 0; row < 5; row++) draw_pixel(rx, oy+row, col);
+    for (int row = 0; row < 5; row++) draw_pixel(rx, oy+row, col);     
     draw_pixel(rx+1, oy, col); draw_pixel(rx+2, oy, col); draw_pixel(rx+3, oy, col);
     draw_pixel(rx+1, oy+2, col); draw_pixel(rx+2, oy+2, col); draw_pixel(rx+3, oy+2, col);
     draw_pixel(rx+1, oy+3, col); draw_pixel(rx+3, oy+4, col);
@@ -318,7 +318,7 @@ static void render_all(void) {
     if (game_over) draw_game_over();
 }
 
-// ── Input ─────────────────────────────────────────────────────────
+// ══ Input ═══════════════════════════════════════════════════
 
 static int read_input(void) {
     uint32_t key = sys_read_key();
@@ -346,7 +346,7 @@ static int read_input(void) {
     return KEY_NONE;
 }
 
-// ── Game logic ────────────────────────────────────────────────────
+// ══ Game logic ══════════════════════════════════════════════
 
 static void init_game(void) {
     snake_len = 3;
@@ -420,11 +420,11 @@ static void move_snake(void) {
     }
 }
 
-// ── Full frame render ─────────────────────────────────────────────
+// ══ Full frame render ═══════════════════════════════════════
 
 static void render_frame(void) {
     // We redraw the entire frame every tick for simplicity.
-    // The screen is only 320x200 = 64K bytes, fine for user mode.
+    // The screen is only 320x200 = 64K bytes, fine for user mode.     
     clear_screen(COL_BLACK);
     draw_status();
     draw_border();
@@ -435,7 +435,7 @@ static void render_frame(void) {
     }
 }
 
-// ── Main game loop ────────────────────────────────────────────────
+// ══ Main game loop ══════════════════════════════════════════
 
 int main(void) {
     sys_debug("[GFX] Snake starting...\r\n");

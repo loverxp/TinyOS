@@ -528,10 +528,8 @@ void vga_set_mode03h(void) {
     vga_restore_font();
     
     // ── 7. Clear text screen ──
-    uint16_t* text_mem = (uint16_t*)0xB8000;
-    for (int i = 0; i < 80 * 25; i++) {
-        text_mem[i] = 0x0720;
-    }
+    // Note: Not clearing here — the caller should decide whether to clear.
+    // Clearing here would destroy output written by user programs (e.g. hello via syscall 7).
 }
 
 // Kernel-mode VGA graphics test — bypasses user mode entirely.
@@ -629,6 +627,13 @@ void syscall_handler(uint32_t* regs) {
             while ((inb(0x3FD) & 0x20) == 0);
             outb(0x3F8, *s++);
         }
+        return;
+    }
+
+    if (syscall_no == 7) {
+        // Syscall 7: write string to VGA console (arg1 = string pointer)
+        const char* s = (const char*)arg1;
+        if (s) vga_writestring(s);
         return;
     }
 

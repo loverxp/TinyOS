@@ -34,7 +34,8 @@ C_SRCS    = kernel/kernel.c kernel/shell.c kernel/except.c kernel/gdt.c \
             drivers/vga.c drivers/keyboard.c drivers/timer.c drivers/interrupts.c \
             lib/string.c lib/stdio.c
 ASM_SRCS  = boot/boot.asm drivers/interrupts.asm drivers/gdt.asm \
-            drivers/io.asm kernel/user.asm kernel/embedded_user.asm
+            drivers/io.asm kernel/user.asm kernel/embedded_user.asm \
+            kernel/embedded_hello.asm
 
 # Object files (all in build/; .asm -> _asm.o to avoid name collision with .c)
 C_OBJS    = $(patsubst %.c,$(BUILD)/%.o,$(notdir $(C_SRCS)))
@@ -42,7 +43,7 @@ ASM_OBJS  = $(patsubst %.asm,$(BUILD)/%_asm.o,$(notdir $(ASM_SRCS)))
 OBJECTS   = $(ASM_OBJS) $(C_OBJS)
 
 # User program files
-USER_BIN  = build/user/gfxsnake.bin
+USER_BINS  = build/user/gfxsnake.bin build/user/hello.bin
 
 # Target
 TARGET    = $(BUILD)/tinyos.bin
@@ -60,8 +61,11 @@ user-programs:
 $(TARGET): $(OBJECTS) | $(BUILD)
 	$(LD) $(LDFLAGS) -o $@ $(OBJECTS)
 
-# embedded_user.asm depends on user binary
-$(BUILD)/embedded_user_asm.o: kernel/embedded_user.asm $(USER_BIN) | $(BUILD)
+# embedded binaries depend on user binaries
+$(BUILD)/embedded_user_asm.o: kernel/embedded_user.asm build/user/gfxsnake.bin | $(BUILD)
+	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD)/embedded_hello_asm.o: kernel/embedded_hello.asm build/user/hello.bin | $(BUILD)
 	$(AS) $(ASFLAGS) -o $@ $<
 
 # Compile C files: map e.g. kernel/kernel.c -> build/kernel.o

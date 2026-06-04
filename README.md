@@ -53,6 +53,7 @@
 | `runuser`     | 加载并执行嵌入式用户程序           |
 | `gfxsnake`    | VGA 图形模式贪吃蛇游戏（像素模式） |
 | `pageinfo`    | 显示页表信息                    |
+| `hello`       | 运行 Ring 3 示例用户程序（使用 libc） |
 
 ## 功能特性
 
@@ -75,6 +76,7 @@
 - ✅ 分页机制（页目录/页表，identity map 前 8MB）
 - ✅ 堆内存分配器（kmalloc/kfree，块式管理）
 - ✅ printf/sprintf 格式化输出（%s, %d, %u, %x, %c, %p）
+- ✅ 用户态标准库 libc（printf, sprintf, exit, 字符串函数）
 - ✅ 交互式 Shell（多命令支持）
 - ✅ 系统调用（int 0x80，支持从用户态返回内核态）
 - ✅ 串口调试输出
@@ -98,8 +100,14 @@ TinyOS/
 │   └── user.asm           # 用户态入口和切换逻辑
 ├── user/
 │   ├── crt0.s             # 用户程序启动代码
-│   ├── hello.c            # 示例用户程序
+│   ├── hello.c            # 示例用户程序（使用 libc）
 │   ├── gfxsnake.c         # 贪吃蛇游戏（VGA Mode 13h 像素模式）
+│   ├── libc/              # 用户态标准库
+│   │   ├── stdio.c        # printf/sprintf 实现
+│   │   ├── stdlib.c       # exit 等工具函数
+│   │   ├── string.c       # 字符串与内存操作
+│   │   ├── syscall.h      # 系统调用封装
+│   │   └── ...            # 头文件
 │   ├── user.ld            # 用户程序链接脚本
 │   ├── build.bat          # 用户程序构建脚本
 │   └── programs/          # 编译输出的用户程序（移入 build/user/）

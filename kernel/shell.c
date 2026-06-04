@@ -358,6 +358,7 @@ static void shell_handle_command(const char* cmd) {
             printf("  pageinfo   - Show page table info\n");
             printf("  snake      - Play Snake game (text mode)\n");
             printf("  gfxsnake   - Play Snake game (pixel graphics mode)\n");
+            printf("  hello      - Run hello user program\n");
     } else if (strcmp(cmd, "clear") == 0) {
         vga_clear_screen(VGA_COLOR_BLACK);
         vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
@@ -428,6 +429,8 @@ static void shell_handle_command(const char* cmd) {
     } else if (strcmp(cmd, "testuser") == 0) {
         extern void test_user_mode(void);
         test_user_mode();
+    } else if (strcmp(cmd, "hello") == 0) {
+        run_hello_user();
     } else {
         printf("Unknown command: %s\n", cmd);
         printf("Type 'help' for available commands.\n");

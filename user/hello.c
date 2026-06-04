@@ -1,27 +1,18 @@
-/* hello.c - Sample user program */
-/* Programmed with only syscalls, no stdlib dependence */
+/* hello.c - Sample user program using libc */
 
-/* Syscall wrappers */
-static void sys_exit(int code) {
-    (void)code;  /* code unused in raw syscall */
-    asm volatile("mov $0, %%eax; int $0x80" : : : "eax", "memory");
-}
+#include "stdio.h"
+#include "stdlib.h"
 
-static void sys_print(void) {
-    asm volatile("mov $1, %%eax; int $0x80" : : : "eax", "memory");
-}
-
-/* Simple print with loop - avoids stdlib */
 static void delay(void) {
     volatile int i;
     for (i = 0; i < 500000; i++);
 }
 
 int main(void) {
-    sys_print();
+    printf("Hello from user mode!\n");
     delay();
-    sys_print();
+    printf("Running in Ring 3 via libc\n");
     delay();
-    sys_exit(0);
+    exit(0);
     return 0;
 }
