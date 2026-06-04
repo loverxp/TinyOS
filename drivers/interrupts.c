@@ -132,7 +132,8 @@ void pic_initialize(void) {
     outb(0xA1, 0x01);
     
     // Mask all interrupts initially - we'll unmask timer and keyboard later
-    outb(0x21, 0xFF);
+    // Bit 2 = 0 to unmask IRQ 2 (PIC cascade), needed for slave PIC (IRQ 8-15)
+    outb(0x21, 0xFB);  // 0xFB = 11111011: all masked except cascade
     outb(0xA1, 0xFF);
 }
 

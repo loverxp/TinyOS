@@ -17,3 +17,7 @@ nasm.exe
 # IDE files
 .vscode/
 .idea/
+.qoder/
+
+# Generated disk image
+disk.img

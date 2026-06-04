@@ -51,9 +51,21 @@
 | `echo <文本>`   | 回显输入的文本                 |
 | `testuser`    | 切换到 Ring 3（用户态）并返回      |
 | `runuser`     | 加载并执行嵌入式用户程序           |
-| `gfxsnake`    | VGA 图形模式贪吃蛇游戏（像素模式） |
-| `pageinfo`    | 显示页表信息                    |
 | `hello`       | 运行 Ring 3 示例用户程序（使用 libc） |
+| `pageinfo`    | 显示页表信息                    |
+| `schedtest [N]`| 启动调度器测试 N 秒（默认 10）     |
+| `snake`       | 文本模式贪吃蛇游戏               |
+| `gfxsnake`    | VGA 图形模式贪吃蛇游戏（像素模式） |
+| `gtest`       | 内核级 VGA 图形测试              |
+| **文件系统**    |                         |
+| `ls`          | 列出磁盘根目录文件               |
+| `cat <文件名>`   | 显示文件内容                   |
+| `diskinfo`    | 显示磁盘/文件系统信息              |
+| **网络**       |                         |
+| `pci`         | 列出所有 PCI 设备               |
+| `net`         | 显示网络配置 (IP/网关/MAC)     |
+| `ping <IP>`   | 发送 ICMP Echo 请求           |
+| `send <IP> <端口> <消息>` | 发送 UDP 数据包        |
 
 ## 功能特性
 
@@ -75,11 +87,17 @@
 - ✅ 物理内存管理（PMM，位图式页帧分配器）
 - ✅ 分页机制（页目录/页表，identity map 前 8MB）
 - ✅ 堆内存分配器（kmalloc/kfree，块式管理）
-- ✅ printf/sprintf 格式化输出（%s, %d, %u, %x, %c, %p）
+- ✅ printf/sprintf 格式化输出（%s, %d, %u, %x, %02x, %04x, %c, %p）
 - ✅ 用户态标准库 libc（printf, sprintf, exit, 字符串函数）
 - ✅ 交互式 Shell（多命令支持）
 - ✅ 系统调用（int 0x80，支持从用户态返回内核态）
+- ✅ 抢占式多任务调度器（Round-Robin，IRQ0 驱动）
 - ✅ 串口调试输出
+- ✅ ATA PIO 磁盘驱动（主 IDE 通道，28-bit LBA）
+- ✅ FAT16 文件系统（只读，目录列表/文件读取）
+- ✅ PCI 总线扫描（配置空间读取，设备枚举）
+- ✅ NE2000 网卡驱动（远程 DMA，接收环形缓冲区，IRQ 处理）
+- ✅ 网络协议栈（ARP / IPv4 / ICMP / UDP）
 
 ## 项目结构
 
@@ -96,6 +114,9 @@ TinyOS/
 │   ├── paging.c           # 分页机制（页目录/页表）
 │   ├── except.c           # 异常处理（含 Page Fault 详细诊断）
 │   ├── loader.c           # 用户程序 ELF 加载器
+│   ├── scheduler.c        # 抢占式多任务调度器
+│   ├── fat16.c            # FAT16 文件系统解析器
+│   ├── net.c              # 网络协议栈 (ARP/IP/ICMP/UDP)
 │   ├── embedded_user.asm  # 嵌入的 gfxsnake.elf
 │   └── user.asm           # 用户态入口和切换逻辑
 ├── user/
@@ -118,7 +139,10 @@ TinyOS/
 │   ├── interrupts.c       # 中断处理（C 部分）
 │   ├── interrupts.asm     # 中断处理中断桩（汇编）
 │   ├── gdt.asm            # GDT 表定义（汇编）
-│   └── io.asm             # I/O 端口操作
+│   ├── io.asm             # I/O 端口操作
+│   ├── ata.c              # ATA PIO 磁盘驱动
+│   ├── pci.c              # PCI 总线扫描
+│   └── ne2000.c           # NE2000 网卡驱动
 ├── lib/
 │   ├── string.c           # 字符串处理
 │   └── stdio.c            # printf/sprintf 格式化输出
@@ -139,9 +163,16 @@ TinyOS/
 │   ├── io.h
 │   ├── string.h
 │   ├── stdio.h
-│   └── loader.h
+│   ├── loader.h
+│   ├── scheduler.h
+│   ├── ata.h              # ATA 驱动
+│   ├── fat16.h            # FAT16 文件系统
+│   ├── pci.h              # PCI 总线
+│   ├── ne2000.h           # NE2000 网卡
+│   └── net.h              # 网络协议栈
 ├── tools/                 # 交叉编译器
 ├── scripts/               # 构建与运行脚本
+│   ├── mkfat16.py         # FAT16 磁盘镜像生成器
 │   ├── run.bat            # 运行 TinyOS
 │   ├── run_debug.bat      # 串口调试模式运行
 │   ├── run_test.bat       # 异常演示模式运行
@@ -183,18 +214,23 @@ TinyOS/
 kernel_main()
   1. 串口初始化（调试输出）
   2. GDT 初始化（内核段 + 用户段 + TSS）
-  3. VGA 初始化（清屏、光标重置）
+  3. VGA 初始化（清屏、光标重置、保存字模）
   4. PMM 初始化（从 GRUB 获取内存映射）
   5. MM 初始化（基于 PMM 的堆分配器）
   6. 分页初始化（identity map 前 8MB）
   7. TSS 初始化（分配内核栈，供 Ring 3→Ring 0 使用）
   8. IDT 初始化（异常 + IRQ + 系统调用门）
-  9. PIC 初始化（重映射，全部屏蔽）
+  9. PIC 初始化（重映射，解除 IRQ 2 cascade 屏蔽）
   10. 定时器初始化（注册 handler，unmask IRQ0）
   11. 键盘初始化（注册 handler，unmask IRQ1）
   12. Shell 初始化（注册键盘回调）
   13. 启用中断（sti）
-  14. 事件驱动主循环（halt）
+  14. 调度器初始化（idle 任务 + 循环链表）
+  15. ATA 磁盘检测
+  16. FAT16 文件系统挂载
+  17. PCI 总线扫描
+  18. NE2000 网卡 + 网络协议栈初始化
+  19. 事件驱动主循环（halt）
 ```
 
 ### 用户态切换流程
@@ -256,6 +292,7 @@ run_user_task(user_main)    ← 内核态（Ring 0）
 | 14         | Page Fault               | 页故障       |
 | 32         | IRQ0                     | 定时器（50Hz） |
 | 33         | IRQ1                     | 键盘        |
+| 43         | IRQ11                    | NE2000 网卡  |
 | 128 (0x80) | Syscall                  | 系统调用      |
 
 ### 构建工具链
@@ -270,8 +307,9 @@ run_user_task(user_main)    ← 内核态（Ring 0）
 使用 Makefile 增量构建（推荐）：
 ```bash
 make              # 构建内核和用户程序
-make run          # 构建并运行
-make run-debug    # 构建并运行（串口调试输出）
+make disk         # 生成 FAT16 磁盘镜像 (disk.img)
+make run          # 构建并运行（含磁盘+网络）
+make run-debug    # 构建并运行（串口调试输出到 logs/serial.log）
 make run-serial   # 构建并运行（纯串口模式）
 make clean        # 清理构建产物
 make rebuild      # 清理并重新构建
@@ -297,3 +335,191 @@ i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin <所有 .o 文件>
 ## 许可证
 
 MIT License
+
+---
+
+## 文件系统使用指南
+
+### 前置条件
+
+运行前需先生成磁盘镜像：
+```bash
+make disk          # 生成 disk.img（16MB FAT16，内含示例文件）
+```
+
+`make run` / `make run-debug` 会自动挂载磁盘镜像。
+
+### 命令示例
+
+```
+TinyOS> ls
+Directory listing:
+Name                Size  Type
+--------------------------------------
+TINYOS                 0  VOL
+README.TXT            49  FILE
+HELLO.C               91  FILE
+CONFIG.TXT            60  FILE
+TEST.TXT             760  FILE
+
+5 entries
+
+TinyOS> cat readme.txt
+Welcome to TinyOS!
+This is a FAT16 disk image.
+(49 bytes)
+
+TinyOS> diskinfo
+Disk info:
+  Total size:      16384 KB
+  Bytes/sector:    512
+  Sectors/cluster: 4
+  Total clusters:  8120
+  Root entries:    512
+```
+
+### 自定义磁盘内容
+
+编辑 `scripts/mkfat16.py` 中的 `files` 列表，然后重新运行 `make disk`。
+
+### 磁盘镜像工具
+
+#### `scripts/mkfat16.py` — FAT16 镜像生成器
+
+纯 Python 脚本，无需任何外部依赖，从 Python 字符串直接构建合法的 FAT16 磁盘镜像。
+
+**功能：**
+- 生成 16 MB raw disk image（`disk.img`）
+- 写入完整的 BPB（BIOS Parameter Block）、两份 FAT 表、根目录
+- 将文件分配到连续簇，并构建 FAT 链表
+
+**磁盘参数：**
+
+| 参数 | 值 |
+|------|------|
+| 总大小 | 16 MB（32768 扇区） |
+| 扇区大小 | 512 字节 |
+| 每簇扇区数 | 4（2 KB/簇） |
+| FAT 副本数 | 2 |
+| 根目录条目数 | 512 |
+| FAT 表大小 | 128 扇区 |
+
+**内置示例文件：**
+
+| 文件名 | 内容 | 大小 |
+|--------|------|------|
+| `README.TXT` | 欢迎信息 | 49 B |
+| `HELLO.C` | C 示例程序 | 91 B |
+| `CONFIG.TXT` | 系统配置参数 | 60 B |
+| `TEST.TXT` | 测试文件（20 行重复） | 760 B |
+
+**添加文件：**
+
+```python
+# 在 mkfat16.py 的 files 列表中追加：
+files = [
+    ("readme.txt", b"Welcome to TinyOS!\r\n..."),
+    ("hello.c",    b'#include <stdio.h>\r\n...'),
+    ("config.txt", b"# TinyOS Configuration\r\n..."),
+    ("test.txt",   b"This is a test file...\r\n" * 20),
+    # 新增文件：
+    ("data.bin",   bytes(range(256))),   # 256 字节二进制数据
+    ("notes.txt",  b"My notes here\r\n"),
+]
+```
+
+**手动运行：**
+
+```batch
+python scripts\mkfat16.py disk.img
+```
+
+> **注意：** 修改后需重新生成 `disk.img` 才能生效。`make disk` 会自动调用此脚本。
+
+#### `scripts/mkfs.bat` — 备用磁盘创建脚本
+
+Windows 批处理脚本，尝试用 Python 创建磁盘；若 Python 不可用则回退到 `fsutil` 创建空白镜像。
+
+```batch
+scripts\mkfs.bat
+```
+
+**流程：**
+1. 优先执行 `python scripts\mkfat16.py disk.img`（含文件系统 + 文件）
+2. 若 Python 不存在或失败，用 `fsutil file createnew disk.img 16777216` 创建 16 MB 空文件
+
+> **提示：** 推荐使用 `make disk` 而不是直接运行 `mkfs.bat`。
+
+---
+
+## 网络使用指南
+
+### QEMU 网络配置
+
+`make run` 会自动配置 QEMU user-mode 网络：
+```
+-netdev user,id=net0,hostfwd=udp::8888-:8888
+-device ne2k_pci,netdev=net0
+```
+
+### 网络地址
+
+| 角色 | IP | 说明 |
+|------|------|------|
+| 虚拟机 | 10.0.2.15 | TinyOS 固定 IP |
+| 网关 | 10.0.2.2 | QEMU 内置 NAT |
+| DNS | 10.0.2.3 | QEMU 内置 DNS |
+
+### 命令示例
+
+```
+TinyOS> pci
+PCI devices:
+Bus    Dev    Fn   Vendor       Device       Class
+----------------------------------------------
+  0     3     0   0x10EC       0x8029       Network
+  0     1     0   0x8086       0x7000       Bridge
+  0     0     0   0x8086       0x1237       Bridge
+
+3 device(s) found
+
+TinyOS> net
+Network config:
+  IP:      10.0.2.15
+  Gateway: 10.0.2.2
+  Mask:    255.255.255.0
+  MAC:     52:54:00:12:34:56
+
+TinyOS> ping 10.0.2.2      ← 首次触发 ARP，需执行两次
+ARP pending, try again...
+
+TinyOS> ping 10.0.2.2      ← 第二次成功
+Ping sent to 10.0.2.2
+
+TinyOS> send 10.0.2.2 8888 Hello from TinyOS!
+Sent 18 bytes to 10.0.2.2:8888
+```
+
+### 在 Windows 上接收 UDP
+
+Windows 没有 netcat，可用 PowerShell：
+```powershell
+$udp = New-Object System.Net.Sockets.UdpClient(8888)
+$remote = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
+$data = $udp.Receive([ref]$remote)
+[System.Text.Encoding]::UTF8.GetString($data)
+$udp.Close()
+```
+
+先在 Windows 上启动上述监听脚本，然后在 TinyOS 中执行 `send` 命令即可收到消息。
+
+### 使用 Python 监听（推荐）
+```python
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.bind(('0.0.0.0', 8888))
+print('Listening on UDP 8888...')
+data, addr = s.recvfrom(1024)
+print(f'Received: {data.decode()}')
+s.close()
+```

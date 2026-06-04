@@ -11,6 +11,11 @@
 #include "../include/paging.h"
 #include "../include/stdio.h"
 #include "../include/scheduler.h"
+#include "../include/ata.h"
+#include "../include/fat16.h"
+#include "../include/pci.h"
+#include "../include/ne2000.h"
+#include "../include/net.h"
 
 // User mode entry points (from user.asm)
 extern void run_user_task(void (*entry)(void));
@@ -130,6 +135,48 @@ void kernel_main(uint32_t multiboot_info_addr) {
 
     scheduler_init();
     serial_string("[OK] Scheduler\n");
+
+    /* Initialize ATA disk driver */
+    if (ata_init() == 0) {
+        printf("[OK] ATA disk detected\n");
+        serial_string("[OK] ATA\n");
+
+        /* Initialize FAT16 filesystem */
+        if (fat16_init() == 0) {
+            printf("[OK] FAT16 filesystem mounted\n");
+            serial_string("[OK] FAT16\n");
+        } else {
+            printf("[!!] FAT16 init failed\n");
+        }
+    } else {
+        printf("[!!] No ATA disk (use -drive flag)\n");
+    }
+
+    /* Scan PCI bus */
+    pci_scan();
+    printf("[OK] PCI: %d device(s)\n", pci_get_device_count());
+    serial_string("[OK] PCI\n");
+
+    /* Initialize NE2000 network driver */
+    if (ne2000_init() == 0) {
+        printf("[OK] NE2000 network card\n");
+        serial_string("[OK] NE2000\n");
+
+        /* Register NE2000 IRQ handler */
+        register_interrupt_handler(32 + 11, ne2000_handler);  /* IRQ 11 */
+        pic_unmask_irq(11);
+
+        /* Initialize network stack */
+        /* QEMU user-mode: host=10.0.2.2, guest=10.0.2.15, gateway=10.0.2.2 */
+        net_init(IP4(10, 0, 2, 15), IP4(10, 0, 2, 2), IP4(255, 255, 255, 0));
+        printf("[OK] Network stack (10.0.2.15)\n");
+        serial_string("[OK] NET\n");
+
+        /* Set NE2000 receive callback to net handler */
+        ne2000_set_recv_callback(net_recv_handler);
+    } else {
+        printf("[!!] No NE2000 NIC (use -netdev + -device flags)\n");
+    }
 
     printf("Type 'help' for available commands.\n\n");
 

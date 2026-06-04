@@ -556,6 +556,97 @@ for (int i = 0; i < 16; i++) {
 
 ---
 
+## 问题16：FAT16 初始化失败 - cluster 数量超出 FAT16 范围
+
+### 现象
+`diskinfo` 和 `ls` 命令无法工作，串口日志显示：
+```
+[FAT16] Cluster count 4060 not in FAT16 range
+```
+
+### 根本原因
+`mkfat16.py` 默认使用 8 sectors/cluster (4096 bytes)，对于 16MB 磁盘：
+- 总扇区 = 32768
+- 数据区扇区 = 32768 - 289 = 32479
+- cluster 数 = 32479 / 8 = 4060
+- FAT16 要求 cluster 数在 4085~65525 范围内
+
+### 解决
+将 `BYTES_PER_CLUSTER` 从 4096 (8 sectors) 改为 2048 (4 sectors)：
+```python
+BYTES_PER_CLUSTER = 2048  # 4 sectors per cluster
+```
+cluster 数 = 32479 / 4 = 8120，在 FAT16 范围内。
+
+### 重新生成磁盘镜像
+```bash
+python scripts\mkfat16.py disk.img
+```
+
+---
+
+## 问题17：printf 不支持 %02x / %04x 宽度修饰符
+
+### 现象
+串口日志和屏幕输出中 `%04x` 等格式不生效，例如：
+```
+[NE2K] I/O base: 0xc000, IRQ: 11    ← 正确
+[NE2K] MAC: 525400123456:...          ← %02x 没补零，连在一起
+```
+
+### 根本原因
+`vsprintf_internal()` 直接跳到 format specifier，没有解析 `%` 后面的宽度和填充标志。
+
+### 解决
+在 `lib/stdio.c` 中添加宽度和零填充解析：
+```c
+fmt++; // skip '%'
+int pad_zero = 0;
+int width = 0;
+if (*fmt == '0') { pad_zero = 1; fmt++; }
+while (*fmt >= '0' && *fmt <= '9') {
+    width = width * 10 + (*fmt - '0');
+    fmt++;
+}
+```
+并在 `%x`, `%X`, `%d`, `%u` case 中应用 padding。
+
+---
+
+## 问题18：NE2000 网卡无法接收数据包 (IRQ 11 不触发)
+
+### 现象
+`ping 10.0.2.2` 发送 ARP 请求后没有回复，串口日志显示：
+```
+[ARP] Sending request for 10.0.2.2
+[ARP] Sending request for 10.0.2.2   ← 重复发送，无回复
+```
+
+### 根本原因
+**PIC cascade (IRQ 2) 被屏蔽。**
+
+IRQ 11 在从 PIC (IRQ 8-15) 上。从 PIC 的中断通过 IRQ 2 转发到主 PIC。
+但 PIC 初始化时 `outb(0x21, 0xFF)` 屏蔽了主 PIC 的所有中断，包括 IRQ 2。
+结果：从 PIC 的中断永远无法到达 CPU。
+
+### 解决
+在 `pic_initialize()` 中，将主 PIC 的初始屏蔽值从 `0xFF` 改为 `0xFB`：
+```c
+// Bit 2 = 0: unmask IRQ 2 (cascade), needed for slave PIC (IRQ 8-15)
+outb(0x21, 0xFB);  // 0xFB = 11111011
+outb(0xA1, 0xFF);
+```
+
+### 同时修复的问题
+- NE2000 RCR 从 0x04 改为 0x14 (PRO + AB)，确保 promiscuous + broadcast 接收
+- RX_STOP 从 0x60 改为 0x80，充分利用 QEMU NE2000 的 32KB 内存
+
+### 经验教训
+> 使用从 PIC (IRQ 8-15) 的设备时，必须确保主 PIC 的 IRQ 2 (cascade) 已解除屏蔽。
+> 这是 NE2000 (IRQ 11)、RTC (IRQ 8)、PS/2 鼠标 (IRQ 12) 等设备的共同要求。
+
+---
+
 ## 问题15：用户程序 hello 输出被清除
 
 ### 现象

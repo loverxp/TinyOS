@@ -54,6 +54,22 @@ static int vsprintf_internal(char* buf, const char* fmt, __builtin_va_list args)
         
         fmt++; // skip '%'
         
+        /* Parse optional flags and width */
+        int pad_zero = 0;
+        int left_align = 0;
+        int width = 0;
+        /* Parse flags */
+        while (*fmt == '0' || *fmt == '-') {
+            if (*fmt == '0') pad_zero = 1;
+            if (*fmt == '-') left_align = 1;
+            fmt++;
+        }
+        /* Parse width */
+        while (*fmt >= '0' && *fmt <= '9') {
+            width = width * 10 + (*fmt - '0');
+            fmt++;
+        }
+        
         switch (*fmt) {
             case 'c': {
                 char c = (char)__builtin_va_arg(args, int);
@@ -63,34 +79,81 @@ static int vsprintf_internal(char* buf, const char* fmt, __builtin_va_list args)
             case 's': {
                 const char* s = __builtin_va_arg(args, const char*);
                 if (!s) s = "(null)";
+                int len = 0;
+                for (const char* p = s; *p; p++) len++;
+                if (!left_align) {
+                    while (len < width) { *str++ = ' '; width--; }
+                }
+                int w = width;
                 while (*s) *str++ = *s++;
+                if (left_align) {
+                    while (len < w) { *str++ = ' '; w--; len++; }
+                }
                 break;
             }
             case 'd':
             case 'i': {
                 int i = __builtin_va_arg(args, int);
                 itoa_str(i, num_buf, 10);
+                int len = 0;
+                for (const char* p = num_buf; *p; p++) len++;
+                if (!left_align) {
+                    int w = width;
+                    while (len < w) { *str++ = ' '; w--; }
+                }
                 char* s = num_buf;
                 while (*s) *str++ = *s++;
+                if (left_align) {
+                    int w = width;
+                    while (len < w) { *str++ = ' '; w--; len++; }
+                }
                 break;
             }
             case 'u': {
                 unsigned int u = __builtin_va_arg(args, unsigned int);
                 uitoa_str(u, num_buf, 10);
+                int len = 0;
+                for (const char* p = num_buf; *p; p++) len++;
+                if (!left_align) {
+                    int w = width;
+                    while (len < w) { *str++ = ' '; w--; }
+                }
                 char* s = num_buf;
                 while (*s) *str++ = *s++;
+                if (left_align) {
+                    int w = width;
+                    while (len < w) { *str++ = ' '; w--; len++; }
+                }
                 break;
             }
             case 'x': {
                 unsigned int x = __builtin_va_arg(args, unsigned int);
                 uitoa_str(x, num_buf, 16);
+                int len = 0;
+                for (const char* p = num_buf; *p; p++) len++;
+                char pad_ch = pad_zero ? '0' : ' ';
+                if (!left_align) {
+                    int w = width;
+                    while (len < w) { *str++ = pad_ch; w--; }
+                }
                 char* s = num_buf;
                 while (*s) *str++ = *s++;
+                if (left_align) {
+                    int w = width;
+                    while (len < w) { *str++ = ' '; w--; len++; }
+                }
                 break;
             }
             case 'X': {
                 unsigned int X = __builtin_va_arg(args, unsigned int);
                 uitoa_str(X, num_buf, 16);
+                int len = 0;
+                for (const char* p = num_buf; *p; p++) len++;
+                char pad_ch = pad_zero ? '0' : ' ';
+                if (!left_align) {
+                    int w = width;
+                    while (len < w) { *str++ = pad_ch; w--; }
+                }
                 char* s = num_buf;
                 while (*s) {
                     if (*s >= 'a' && *s <= 'f') {
@@ -98,6 +161,10 @@ static int vsprintf_internal(char* buf, const char* fmt, __builtin_va_list args)
                     } else {
                         *str++ = *s++;
                     }
+                }
+                if (left_align) {
+                    int w = width;
+                    while (len < w) { *str++ = ' '; w--; len++; }
                 }
                 break;
             }

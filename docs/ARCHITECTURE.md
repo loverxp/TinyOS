@@ -93,7 +93,9 @@ kernel_main()
 ├─> 8. 初始化可编程中断控制器 (PIC)
 │   └─> pic_initialize()
 │       └─> 重映射 PIC: 主 PIC -> 0x20, 从 PIC -> 0x28
-│       └─> 默认屏蔽所有中断 (0xFF)
+│       └─> 默认屏蔽所有中断，但启用 IRQ 2 (cascade)
+│       └─> IRQ 2 是从 PIC (IRQ 8-15) 到主 PIC 的级联通道
+│       └─> 没有 IRQ 2 的解除屏蔽，IRQ 8-15 的中断无法到达 CPU
 │
 ├─> 9. 初始化定时器
 │   └─> timer_initialize(50)
@@ -121,7 +123,27 @@ kernel_main()
 │       └─> 创建 idle 任务（pid=0，state=RUNNING）
 │       └─> idle->next = idle（单节点循环链表）
 │
-└─> 14. 进入事件驱动主循环
+├─> 14. 初始化 ATA 磁盘驱动
+│   └─> ata_init()
+│       └─> 检测主 IDE 通道磁盘 (0x1F0)
+│
+├─> 15. 初始化 FAT16 文件系统
+│   └─> fat16_init()
+│       └─> 读取 BPB，验证 FAT16，计算布局
+│
+├─> 16. PCI 总线扫描
+│   └─> pci_scan()
+│       └─> 扫描 bus 0, 设备 0-31
+│
+├─> 17. 初始化 NE2000 网卡
+│   └─> ne2000_init()
+│       └─> PCI 查找 vendor=0x10EC, device=0x8029
+│       └─> 重置 + 配置 + 读取 MAC
+│   └─> register_interrupt_handler(43, ne2000_handler)  ← IRQ 11
+│   └─> pic_unmask_irq(11)  ──> 启用 IRQ 11
+│   └─> net_init(10.0.2.15, 10.0.2.2, 255.255.255.0)
+│
+└─> 18. 进入事件驱动主循环
     └─> while(1) { halt(); }  // 等待中断
 ```
 
@@ -153,8 +175,12 @@ kernel_main()
 ├─[12] Shell 初始化         键盘回调绑定
 ├─[13] 启用中断             sti
 ├─[14] 调度器初始化           idle 任务 + 循环链表
+├─[15] ATA 初始化            磁盘检测
+├─[16] FAT16 初始化          BPB 解析 + 文件系统挂载
+├─[17] PCI 总线扫描          设备枚举
+├─[18] NE2000 + 网络初始化    网卡驱动 + IP 配置
 │
-└─[15] 主循环              halt() 等待中断
+└─[19] 主循环              halt() 等待中断
 ```
 
 ---
@@ -755,6 +781,140 @@ struct mm_block {
 
 ---
 
+## 文件系统模块
+
+### ATA PIO 驱动 (`drivers/ata.c`)
+
+```
+ATA 主通道 (I/O base = 0x1F0)
+│
+├─> ata_init()
+│   └─> 选择 master drive (0xE0)
+│   └─> 检查 status != 0xFF (磁盘存在)
+│   └─> ata_wait_ready() 等待 BSY 清除
+│
+├─> ata_identify(buf)
+│   └─> 发送 IDENTIFY 命令 (0xEC)
+│   └─> 读取 256 words (512 bytes) 识别数据
+│
+└─> ata_read_sectors(lba, count, buffer)
+    └─> 28-bit LBA 寻址
+    └─> 逐扇区读取 256 words
+    └─> 等待 DRQ 后读取数据
+```
+
+### FAT16 文件系统 (`kernel/fat16.c`)
+
+```
+磁盘布局 (16MB, 4 sectors/cluster):
+┌─────────┬─────────┬─────────┬──────────────┐
+│ Boot(1) │ FAT1(128)│ FAT2(128)│ RootDir(32) │ Data...
+└─────────┴─────────┴─────────┴──────────────┘
+ LBA 0      1         129       257          289
+
+fat16_init():
+  ├─> 读取 sector 0 (BPB)
+  ├─> 解析: bytes_per_sector, sectors_per_cluster, reserved_sectors, ...
+  ├─> 计算: fat_start, root_dir_start, data_start, total_clusters
+  └─> 验证: total_clusters 在 4085~65525 范围内 (FAT16)
+
+fat16_find(name):
+  └─> 扫描根目录，匹配 8.3 文件名
+
+fat16_read(entry, offset, buffer, size):
+  ├─> cluster_to_lba(cluster) = data_start + (cluster-2) * sectors_per_cluster
+  ├─> fat16_next_cluster(cluster) = FAT[cluster] (2 字节/项)
+  └─> 逐扇区读取，处理跨 cluster 边界
+
+fat16_list():
+  └─> 遍历根目录，显示文件名、大小、类型
+```
+
+### Shell 文件命令
+
+```
+TinyOS> ls                    列出根目录所有文件
+TinyOS> cat readme.txt        读取并显示文件内容
+TinyOS> diskinfo              显示 BPB 信息（大小、簇数、布局）
+```
+
+---
+
+## 网络模块
+
+### PCI 总线扫描 (`drivers/pci.c`)
+
+```
+PCI 配置空间访问:
+  写 CF8h: [31:enable] [23:16:bus] [15:11:dev] [10:8:func] [7:0:offset]
+  读 CFCh: 返回 32-bit 寄存器值
+
+pci_scan():
+  └─> 扫描 bus 0, 设备 0-31
+      └─> pci_check_device() 读取 vendor/device ID
+      └─> 存储: bus, dev, func, vendor_id, device_id, class, BAR[0-5], irq_line
+```
+
+### NE2000 网卡驱动 (`drivers/ne2000.c`)
+
+```
+NE2000 PCI (vendor=0x10EC, device=0x8029, 32KB 内存)
+│
+├─> ne2000_init()
+│   ├─> PCI 查找设备，获取 I/O base + IRQ
+│   ├─> 重置 (读/写 reset 寄存器)
+│   ├─> 停止 NIC (CMD = STP + RD2)
+│   ├─> 配置 DCR/TCR/RCR (word DMA, promiscuous+broadcast)
+│   ├─> 设置页边界: TX=0x40, RX=0x46~0x80
+│   ├─> 读取 MAC 地址 (DMA 读 NIC 内存 0x0000)
+│   ├─> 设置 PAR0~PAR5 (page 1)
+│   ├─> 启用中断 (IMR: PRX+PTX+RXE+TXE+OVW)
+│   └─> 启动 NIC (CMD = STA + RD2)
+│
+├─> ne2000_send(data, len)
+│   ├─> DMA 写到 TX buffer (page 0x40)
+│   ├─> 设置 TPSR + TBCR0/TBCR1
+│   └─> 触发发送 (CMD = STA + TXP + RD2)
+│
+└─> ne2000_handler() (IRQ 11)
+    ├─> 读取 ISR，清除中断位
+    ├─> PRX: ne2k_process_rx() 处理接收环形缓冲区
+    │   └─> 读取 4-byte header → DMA 读包数据 → 回调 recv_callback
+    └─> PTX: 发送完成（无需处理）
+```
+
+### 网络协议栈 (`kernel/net.c`)
+
+```
+net_init(ip, gateway, mask):
+  └─> 设置 IP=10.0.2.15, GW=10.0.2.2, Mask=255.255.255.0
+
+net_recv_handler(frame, len):  ← NE2000 回调
+  ├─> 解析以太网头 ethertype
+  ├─> ARP: handle_arp() → ARP 请求/应答
+  └─> IP:  handle_ip() → ICMP/UDP 分发
+
+发送流程 (以 ping 为例):
+  net_send_icmp_echo(dst_ip)
+    ├─> resolve_dst(): 判断同子网 vs 网关
+    ├─> net_arp_lookup(route_ip): 查找 MAC
+    │   └─> 未找到: 发送 ARP 请求，返回 -1
+    ├─> build_eth_header(dst_mac, 0x0800)
+    ├─> build_ip_header(...)
+    └─> ne2000_send(frame, len)
+```
+
+### Shell 网络命令
+
+```
+TinyOS> pci                   列出所有 PCI 设备
+TinyOS> net                   显示网络配置 (IP/GW/Mask/MAC)
+TinyOS> ping 10.0.2.2         发送 ICMP echo (首次触发 ARP)
+TinyOS> send 10.0.2.2 8888 Hello   发送 UDP 数据包
+```
+
+---
+
 ## 文件依赖关系
 
 ```
@@ -797,6 +957,22 @@ boot.asm
         └─> shell_init()        [shell.c]
             └─> keyboard_register_char_callback() [keyboard.c]
 
+        ├─> ata_init()          [ata.c]
+        │   └─> inb() / outb()  [io.asm]
+        │
+        ├─> fat16_init()        [fat16.c]
+        │   └─> ata_read_sectors() [ata.c]
+        │
+        ├─> pci_scan()          [pci.c]
+        │   └─> outl() / inl()  [io.asm]
+        │
+        ├─> ne2000_init()       [ne2000.c]
+        │   ├─> pci_find_device() [pci.c]
+        │   └─> inb() / outb()  [io.asm]
+        │
+        └─> net_init()          [net.c]
+            └─> ne2000_set_recv_callback() [ne2000.c]
+
 中断/异常发生时:
     interrupts.asm (stub)
         │
@@ -809,6 +985,8 @@ boot.asm
             │   └─ need_reschedule = 1
             ├─ keyboard_handler() [keyboard.c]
             │   └─ inb() / outb() [io.asm]
+            ├─ ne2000_handler()  [ne2000.c]
+            │   └─ net_recv_handler() [net.c]
             └─ pic_send_eoi()   [interrupts.c]
 
     irq_common_stub 调度 hook (interrupts.asm):

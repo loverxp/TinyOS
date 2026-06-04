@@ -11,6 +11,11 @@
 #include "../include/interrupts.h"
 #include "../include/io.h"
 #include "../include/scheduler.h"
+#include "../include/ata.h"
+#include "../include/fat16.h"
+#include "../include/pci.h"
+#include "../include/ne2000.h"
+#include "../include/net.h"
 
 #define LINE_BUF_SIZE 256
 
@@ -337,6 +342,29 @@ static uint32_t parse_hex(const char* s) {
     return val;
 }
 
+/* Parse "A.B.C.D" into 4 octets. Returns 1 on success, 0 on failure. */
+static int parse_ip(const char* s, uint32_t* a, uint32_t* b, uint32_t* c, uint32_t* d) {
+    *a = *b = *c = *d = 0;
+    int octets = 0;
+    uint32_t* targets[4] = {a, b, c, d};
+    while (*s && octets < 4) {
+        if (*s >= '0' && *s <= '9') {
+            *targets[octets] = *targets[octets] * 10 + (*s - '0');
+        } else if (*s == '.') {
+            octets++;
+            if (octets >= 4) return 0;
+        } else {
+            break;
+        }
+        s++;
+    }
+    /* Validate all octets are 0-255 */
+    for (int i = 0; i <= octets; i++) {
+        if (*targets[i] > 255) return 0;
+    }
+    return (octets == 3) ? 1 : 0;
+}
+
 // Deadline tick (absolute timer tick count) for schedtest tasks.
 // When timer_get_ticks() >= this value, tasks call task_exit().
 static volatile uint32_t schedtest_deadline = 0;
@@ -401,7 +429,14 @@ static void shell_handle_command(const char* cmd) {
             printf("  snake      - Play Snake game (text mode)\n");
             printf("  gfxsnake   - Play Snake game (pixel graphics mode)\n");
             printf("  hello      - Run hello user program\n");
-            printf("  schedtest [N]- Start scheduler test for N seconds (default 10)\n");
+            printf("  schedtest [N]- Start scheduler test for N seconds\n");
+            printf("  ls         - List files on disk\n");
+            printf("  cat <file> - Print file contents\n");
+            printf("  diskinfo   - Show disk/filesystem info\n");
+            printf("  pci        - List PCI devices\n");
+            printf("  net        - Show network config\n");
+            printf("  ping <ip>  - Send ICMP echo request (ARP)\n");
+            printf("  send <ip> <port> <msg> - Send UDP packet\n");
     } else if (strcmp(cmd, "clear") == 0) {
         vga_clear_screen(VGA_COLOR_BLACK);
         vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
@@ -478,6 +513,94 @@ static void shell_handle_command(const char* cmd) {
         const char* args = cmd + 9;
         while (*args == ' ') args++;
         cmd_schedtest(*args ? args : NULL);
+    } else if (strcmp(cmd, "ls") == 0) {
+        fat16_list();
+    } else if (strncmp(cmd, "cat ", 4) == 0) {
+        const char* fname = cmd + 4;
+        while (*fname == ' ') fname++;
+        fat16_entry_t entry;
+        if (fat16_find(fname, &entry) == 0) {
+            /* Read file into a buffer and print */
+            static char cat_buf[4096];
+            uint32_t to_read = entry.file_size;
+            if (to_read > sizeof(cat_buf) - 1) to_read = sizeof(cat_buf) - 1;
+            uint32_t got = fat16_read(&entry, 0, cat_buf, to_read);
+            cat_buf[got] = '\0';
+            printf("%s", cat_buf);
+            if (got > 0 && cat_buf[got-1] != '\n') printf("\n");
+            printf("(%u bytes)\n", entry.file_size);
+        } else {
+            printf("File not found: %s\n", fname);
+        }
+    } else if (strcmp(cmd, "diskinfo") == 0) {
+        const fat16_bpb_t* b = fat16_get_bpb();
+        if (!b) {
+            printf("No filesystem mounted\n");
+        } else {
+            printf("Disk info:\n");
+            printf("  Total size:      %u KB\n", b->total_size / 1024);
+            printf("  Bytes/sector:    %u\n", b->bytes_per_sector);
+            printf("  Sectors/cluster: %u\n", b->sectors_per_cluster);
+            printf("  Total clusters:  %u\n", b->total_clusters);
+            printf("  Root entries:    %u\n", b->root_entry_count);
+        }
+    } else if (strcmp(cmd, "pci") == 0) {
+        pci_list_devices();
+    } else if (strcmp(cmd, "net") == 0) {
+        uint32_t ip, gw, mask;
+        net_get_config(&ip, &gw, &mask);
+        if (ip == 0) {
+            printf("Network not initialized\n");
+        } else {
+            printf("Network config:\n");
+            printf("  IP:      %u.%u.%u.%u\n", ip & 0xFF, (ip >> 8) & 0xFF, (ip >> 16) & 0xFF, (ip >> 24) & 0xFF);
+            printf("  Gateway: %u.%u.%u.%u\n", gw & 0xFF, (gw >> 8) & 0xFF, (gw >> 16) & 0xFF, (gw >> 24) & 0xFF);
+            printf("  Mask:    %u.%u.%u.%u\n", mask & 0xFF, (mask >> 8) & 0xFF, (mask >> 16) & 0xFF, (mask >> 24) & 0xFF);
+            const uint8_t* mac = ne2000_get_mac();
+            printf("  MAC:     %02x:%02x:%02x:%02x:%02x:%02x\n",
+                   mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        }
+    } else if (strncmp(cmd, "ping ", 5) == 0) {
+        const char* ipstr = cmd + 5;
+        while (*ipstr == ' ') ipstr++;
+        uint32_t a, b, c, d;
+        if (parse_ip(ipstr, &a, &b, &c, &d)) {
+            uint32_t target_ip = IP4(a, b, c, d);
+            int ret = net_send_icmp_echo(target_ip, 1, 1);
+            if (ret < 0) {
+                printf("ARP pending, try again...\n");
+            } else {
+                printf("Ping sent to %u.%u.%u.%u\n", a, b, c, d);
+            }
+        } else {
+            printf("Usage: ping A.B.C.D\n");
+        }
+    } else if (strncmp(cmd, "send ", 5) == 0) {
+        /* send <ip> <port> <msg> */
+        const char* arg = cmd + 5;
+        while (*arg == ' ') arg++;
+        uint32_t a, b, c, d;
+        if (parse_ip(arg, &a, &b, &c, &d)) {
+            /* Skip past IP */
+            while (*arg && *arg != ' ') arg++;
+            while (*arg == ' ') arg++;
+            /* Parse port */
+            uint32_t port = 0;
+            while (*arg >= '0' && *arg <= '9') {
+                port = port * 10 + (*arg++ - '0');
+            }
+            while (*arg == ' ') arg++;
+            /* Rest is message */
+            uint32_t target_ip = IP4(a, b, c, d);
+            int ret = net_send_udp(target_ip, (uint16_t)port, 1234, arg, strlen(arg));
+            if (ret < 0) {
+                printf("ARP pending, try again...\n");
+            } else {
+                printf("Sent %u bytes to %u.%u.%u.%u:%u\n", strlen(arg), a, b, c, d, port);
+            }
+        } else {
+            printf("Usage: send A.B.C.D <port> <message>\n");
+        }
     } else {
         printf("Unknown command: %s\n", cmd);
         printf("Type 'help' for available commands.\n");

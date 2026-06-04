@@ -20,6 +20,12 @@
 - 交互式 Shell（多命令支持）
 - VGA 状态栏（系统运行时间、堆使用量、空闲内存）
 - 抢占式多任务调度器（Round-Robin，IRQ0 驱动，`schedtest` 命令验证）
+- **ATA PIO 磁盘驱动**（主 IDE 通道，28-bit LBA，读扇区 / IDENTIFY）
+- **FAT16 文件系统**（只读挂载，BPB 解析，目录列表，文件读取，cluster 链遍历）
+- **PCI 总线扫描**（配置空间读取，vendor/device ID，BAR，IRQ line）
+- **NE2000 网卡驱动**（PCI 发现，远程 DMA 读写，接收环形缓冲区，IRQ 处理）
+- **网络协议栈**（ARP 请求/应答，IPv4，ICMP Echo，UDP 收发）
+- **printf 增强**（支持 `%02x` `%04x` 等宽度和零填充修饰符）
 
 ---
 
@@ -154,40 +160,39 @@ struct page_directory_entry {
 
 ---
 
-## 第三阶段：文件系统 (v0.6 - v0.7)
+## 第三阶段：文件系统 (v0.6 - v0.7) ✅ 部分完成
 
-### 3.1 虚拟文件系统 (VFS)
-**目标**：抽象文件系统接口
+### 3.1 FAT16 文件系统（已实现，只读）
 
-```c
-struct vfs_node {
-    char name[256];
-    uint32_t type;          // FILE, DIRECTORY, DEVICE
-    uint32_t size;
-    uint32_t permissions;
-    
-    // 操作函数指针
-    uint32_t (*read)(struct vfs_node* node, uint32_t offset, uint32_t size, uint8_t* buffer);
-    uint32_t (*write)(struct vfs_node* node, uint32_t offset, uint32_t size, uint8_t* buffer);
-    void (*open)(struct vfs_node* node);
-    void (*close)(struct vfs_node* node);
-    struct vfs_node* (*finddir)(struct vfs_node* node, char* name);
-};
-```
+- [x] **ATA PIO 驱动** (`drivers/ata.c`)
+  - 主 IDE 通道 (0x1F0)，28-bit LBA 寻址
+  - `ata_init()` 检测磁盘，`ata_identify()` 读取设备信息
+  - `ata_read_sectors()` 读扇区，支持多扇区连续读
 
-### 3.2 简单文件系统
-**目标**：实现一个基本的文件系统
+- [x] **FAT16 解析器** (`kernel/fat16.c`)
+  - BPB (BIOS Parameter Block) 解析与验证
+  - 根目录扫描（8.3 文件名，LFN 跳过）
+  - 文件查找 (`fat16_find`) + 读取 (`fat16_read`)
+  - Cluster 链遍历，支持跨 cluster 读取
+  - Shell 命令：`ls`（目录列表）、`cat`（文件内容）、`diskinfo`（磁盘信息）
 
-- [ ] **RAMFS** - 内存文件系统（最简单）
-- [ ] **FAT12/16** - 兼容 DOS 文件系统
-- [ ] **Ext2** - 类 Unix 文件系统（高级）
+- [x] **磁盘镜像生成** (`scripts/mkfat16.py`)
+  - 生成 16MB FAT16 镜像（4 sectors/cluster, 8120 clusters）
+  - 内含示例文件：readme.txt, hello.c, config.txt, test.txt
 
-### 3.3 块设备驱动
-**目标**：读写磁盘
+- [ ] **写支持**（FAT 表更新、文件创建/删除）
+- [ ] **子目录支持**
 
-- [ ] IDE 硬盘驱动
-- [ ] ATA PIO 模式
+### 3.2 块设备驱动
+
+- [x] IDE 硬盘驱动（ATA PIO 模式）
+- [ ] DMA 模式（性能优化）
 - [ ] 磁盘分区支持
+
+### 3.3 高级文件系统
+
+- [ ] **VFS 虚拟文件系统层**
+- [ ] **Ext2** - 类 Unix 文件系统
 
 ---
 
@@ -231,7 +236,7 @@ struct vfs_node {
 **目标**：命令行解释器
 
 - [x] 命令解析
-- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`
+- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `ls`, `cat`, `diskinfo`, `pci`, `net`, `ping`, `send`
 - [ ] 程序执行：`fork` + `exec`
 - [ ] 管道支持：`cmd1 | cmd2`
 
@@ -255,30 +260,76 @@ struct vfs_node {
 
 ---
 
-## 第五阶段：网络与高级功能 (v1.0+)
+## 第五阶段：网络与高级功能 (v1.0+) ✅ 网络部分完成
 
-### 5.1 网络协议栈
-**目标**：实现 TCP/IP 协议栈
+### 5.1 网络协议栈（已实现基础功能）
 
-- [ ] **网卡驱动**
-  - RTL8139 或 E1000 驱动
-  - QEMU 虚拟网卡支持
+- [x] **NE2000 网卡驱动** (`drivers/ne2000.c`)
+  - PCI 自动发现（vendor=0x10EC, device=0x8029）
+  - 远程 DMA 读写（NIC 内存访问）
+  - 接收环形缓冲区（page 0x46~0x80，32KB NIC 内存）
+  - IRQ 处理（IRQ 11，slave PIC via cascade IRQ 2）
+  - MAC 地址读取，promiscuous + broadcast 接收
 
-- [ ] **网络层**
-  - ARP 协议
-  - IP 协议
-  - ICMP (ping)
+- [x] **PCI 总线扫描** (`drivers/pci.c`)
+  - 配置空间读写（CF8h/CFC h）
+  - Vendor/Device ID、BAR、IRQ line 读取
+  - Shell 命令：`pci`（列出所有 PCI 设备）
 
-- [ ] **传输层**
-  - UDP
-  - TCP（简化版）
+- [x] **ARP 协议** (`kernel/net.c`)
+  - ARP 请求发送 + 应答处理
+  - 16 项 ARP 缓存表
+  - 自动学习发送方 MAC
 
-- [ ] **应用层**
-  - DHCP 客户端
-  - DNS 解析
-  - HTTP 客户端/服务器
+- [x] **IPv4**
+  - IP 头部构建、校验和计算
+  - 子网掩码 + 网关路由（直接 vs 网关转发）
 
-### 5.2 图形界面
+- [x] **ICMP**
+  - Echo Request 发送 / Echo Reply 应答
+  - Shell 命令：`ping <ip>`
+
+- [x] **UDP**
+  - UDP 数据报发送/接收
+  - Shell 命令：`send <ip> <port> <msg>`
+
+- [ ] **TCP**（简化版）
+- [ ] **DHCP 客户端**
+- [ ] **DNS 解析**
+- [ ] **HTTP 客户端/服务器**
+
+### 5.2 网络使用指南
+
+**QEMU 网络配置**（已在 Makefile 中配置）：
+```
+-netdev user,id=net0,hostfwd=udp::8888-:8888
+-device ne2k_pci,netdev=net0
+```
+
+**IP 配置**（QEMU user-mode networking）：
+| 角色 | IP | 说明 |
+|------|------|------|
+| 虚拟机 (guest) | 10.0.2.15 | TinyOS 固定 IP |
+| 网关 (gateway) | 10.0.2.2 | QEMU 内置 NAT 网关 |
+| DNS | 10.0.2.3 | QEMU 内置 DNS |
+| 主机 (host) | 10.0.2.2 | 通过网关访问 |
+
+**Windows 上接收 UDP 消息**（替代 netcat）：
+```powershell
+# PowerShell UDP 监听
+$udp = New-Object System.Net.Sockets.UdpClient(8888)
+$remote = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
+$data = $udp.Receive([ref]$remote)
+[System.Text.Encoding]::UTF8.GetString($data)
+$udp.Close()
+```
+
+**TinyOS 端发送**：
+```
+TinyOS> send 10.0.2.2 8888 Hello from TinyOS!
+```
+
+### 5.3 图形界面
 **目标**：图形用户界面 (GUI)
 
 - [x] **VGA 图形模式**
@@ -292,13 +343,14 @@ struct vfs_node {
 
 - [x] **贪吃蛇游戏**（VGA 图形模式）
 
-### 5.3 高级功能
+- [x] **PCI 总线枚举**（已实现，`pci` 命令）
 
-- [ ] **动态链接器**
-- [ ] **多核/SMP 支持**
-- [ ] **USB 驱动**
-- [ ] **声音驱动**
-- [ ] **PCI 总线枚举**
+### 5.4 高级功能
+
+- [ ] 动态链接器
+- [ ] 多核/SMP 支持
+- [ ] USB 驱动
+- [ ] 声音驱动
 
 ---
 
