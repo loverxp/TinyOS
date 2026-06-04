@@ -32,4 +32,7 @@ void syscall_handler(uint32_t* regs);
 struct idt_ptr;
 extern void idt_load(struct idt_ptr* ptr);
 
+// VGA graphics mode test (kernel-mode direct test, no user program needed)
+void vga_gfx_test(void);
+
 #endif // INTERRUPTS_H

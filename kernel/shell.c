@@ -8,6 +8,7 @@
 #include "../include/stdio.h"
 #include "../include/loader.h"
 #include "../include/paging.h"
+#include "../include/interrupts.h"
 #include "../include/io.h"
 
 #define LINE_BUF_SIZE 256
@@ -356,6 +357,7 @@ static void shell_handle_command(const char* cmd) {
             printf("  runuser    - Load and run external user program\n");
             printf("  pageinfo   - Show page table info\n");
             printf("  snake      - Play Snake game (text mode)\n");
+            printf("  gfxsnake   - Play Snake game (pixel graphics mode)\n");
     } else if (strcmp(cmd, "clear") == 0) {
         vga_clear_screen(VGA_COLOR_BLACK);
         vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
@@ -417,6 +419,10 @@ static void shell_handle_command(const char* cmd) {
         paging_dump_info();
     } else if (strcmp(cmd, "snake") == 0) {
         snake_start(0);
+    } else if (strcmp(cmd, "gfxsnake") == 0) {
+        run_loaded_user();
+    } else if (strcmp(cmd, "gtest") == 0) {
+        vga_gfx_test();
     } else if (strcmp(cmd, "runuser") == 0) {
         run_loaded_user();
     } else if (strcmp(cmd, "testuser") == 0) {

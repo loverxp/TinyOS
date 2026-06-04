@@ -417,3 +417,139 @@ for (int t = 0; t < 2; t++) {  // 2 个页表 = 8MB
     // 设置页目录项
 }
 ```
+
+---
+
+## 问题13：gfxsnake 启动黑屏（VGA Mode 13h 初始化失败）
+
+### 现象
+运行 `gfxsnake` 命令后屏幕全黑，按键无反应。游戏应显示状态栏、边框、蛇和食物。
+
+### 根本原因
+VGA Mode 13h 寄存器编程顺序不正确：
+1. 缺少 DAC 调色板初始化 — 像素值需要有调色板才能映射为颜色
+2. CRTC/Sequencer/Attribute Controller 寄存器编程顺序错误
+
+### 解决
+修正寄存器编程顺序为：Misc Output → Sequencer（复位→编程→释放）→ Graphics Controller → CRTC（解锁→编程→上锁）→ Attribute Controller（编程→重新使能视频）→ DAC 调色板
+
+关键代码在 `vga_set_mode13h()`：
+```c
+// 1. Misc Output — 必须在 CRTC 之前设置，因为 CRTC 时序依赖点时钟
+outb(0x3C2, 0x63);
+
+// 2. Sequencer — 在复位状态下编程，完成后释放
+outb(0x3C4, 0x00); outb(0x3C5, 0x01);  // 复位
+// ... 编程寄存器 ...
+outb(0x3C4, 0x00); outb(0x3C5, 0x03);  // 释放复位
+
+// 3. Graphics Controller
+outb(0x3CE, 0x05); outb(0x3CF, 0x40);  // Mode: 256-color
+outb(0x3CE, 0x06); outb(0x3CF, 0x05);  // Misc: A0000, graphics
+
+// 4. CRTC — 先解锁再编程最后上锁
+outb(0x3D4, 0x11); outb(0x3D5, inb(0x3D5) & 0x7F);  // 解锁
+// ... CRTC 时序寄存器 ...
+outb(0x3D4, 0x11); outb(0x3D5, 0x8E);  // 上锁
+
+// 5. Attribute Controller — 先复位 flip-flop
+inb(0x3DA);
+outb(0x3C0, 0x10); outb(0x3C0, 0x41);  // Mode Control
+// ... 其他寄存器 ...
+outb(0x3C0, 0x20);  // 重新使能视频
+
+// 6. DAC 调色板 — 初始化标准 16 色
+outb(0x3C8, 0);
+for (int i = 0; i < 16; i++) {
+    outb(0x3C9, r); outb(0x3C9, g); outb(0x3C9, b);
+}
+```
+
+### 验证
+- 内核级 `gtest` 命令显示绿色背景和交叉图案
+- gfxsnake 游戏正常运行
+
+---
+
+## 问题14：退出 gfxsnake 后屏幕花屏（竖线、字符黑块）
+
+### 现象
+退出贪吃蛇游戏后，屏幕出现大量竖线，原本应该显示字符的地方变为黑块。
+
+### 根本原因
+**VGA 字模数据被破坏。**
+
+Mode 13h 使用 chain-4 线性帧缓冲模式。写入像素到 `0xA0000` 时，每 4 个字节中有一个写入 VGA plane 2（通过 chain-4 交织映射）。Plane 2 在文本模式下存储由 BIOS 加载的 8x16 字模位图（256 字符 × 16 字节 = 4096 字节）。
+
+Mode 13h 的像素写入覆盖了 plane 2 的字模数据，导致切换回文本模式后 VGA 用损坏的字模渲染字符 — 看起来就是花屏和黑块。
+
+### 解决
+#### 1. 开机保存字模
+新增 `vga_save_font()` 在 `vga_initialize()` 后立即调用：
+```c
+void vga_save_font(void) {
+    // 临时配置 VGA 寄存器以读取 plane 2
+    outb(0x3C4, 0x04); outb(0x3C5, 0x06);  // Memory Mode: 无 chain-4
+    outb(0x3C4, 0x02); outb(0x3C5, 0x04);  // Map Mask: plane 2
+    outb(0x3CE, 0x04); outb(0x3CF, 0x02);  // Read Map: plane 2
+    outb(0x3CE, 0x05); outb(0x3CF, 0x00);  // Mode: 无 odd/even
+    outb(0x3CE, 0x06); outb(0x3CF, 0x05);  // Misc: A0000
+    
+    // 读取 4096 字节字模数据
+    volatile uint8_t* font_vram = (volatile uint8_t*)0xA0000;
+    for (int i = 0; i < 4096; i++)
+        font_buf[i] = font_vram[i];
+    
+    // 恢复寄存器
+}
+```
+
+#### 2. 切换回文本模式时恢复字模
+在 `vga_set_mode03h()` 末尾调用 `vga_restore_font()`：
+```c
+static void vga_restore_font(void) {
+    // 配置为写入 plane 2
+    outb(0x3C4, 0x04); outb(0x3C5, 0x06);
+    outb(0x3C4, 0x02); outb(0x3C5, 0x04);
+    outb(0x3CE, 0x05); outb(0x3CF, 0x00);
+    outb(0x3CE, 0x06); outb(0x3CF, 0x05);
+    outb(0x3CE, 0x00); outb(0x3CF, 0x00);  // Set/Reset: 无
+    outb(0x3CE, 0x01); outb(0x3CF, 0x00);  // Enable Set/Reset: 无
+    outb(0x3CE, 0x08); outb(0x3CF, 0xFF);  // Bit Mask: 全部
+    
+    // 写回 4096 字节字模
+    volatile uint8_t* font_vram = (volatile uint8_t*)0xA0000;
+    for (int i = 0; i < 4096; i++)
+        font_vram[i] = font_buf[i];
+}
+```
+
+#### 3. 初始化 Attribute Controller 调色板
+在 `vga_set_mode03h()` 中添加 16 个调色板寄存器的初始化为恒等映射（颜色 i → DAC 索引 i）：
+```c
+inb(0x3DA);  // 复位 flip-flop
+for (int i = 0; i < 16; i++) {
+    outb(0x3C0, i);       // Palette 寄存器索引
+    outb(0x3C0, i);       // 值 = DAC 索引（恒等映射）
+}
+```
+
+### 涉及文件
+- `drivers/interrupts.c`: 新增 `vga_save_font()`、`vga_restore_font()`；修改 `vga_set_mode03h()` 添加调色板初始化和字模恢复
+- `kernel/kernel.c`: 在 `vga_initialize()` 后添加 `vga_save_font()` 调用
+- `include/vga.h`: 添加 `vga_save_font()` 声明
+
+### 验证
+退出 gfxsnake 后文本模式恢复正常，无竖线，字符显示正确。
+
+---
+
+## 已知问题：退出 gfxsnake 后无法再次进入
+
+### 现象
+第一次运行 `gfxsnake` 正常，退出后再次输入 `gfxsnake` 输出"用户栈分配失败"（`pmm_alloc_page()` 返回 NULL）。
+
+### 状态
+待排查。可能原因：
+- 用户程序栈页面未正确释放（`pmm_free_page` 后 PMM 位图状态不一致）
+- 物理内存管理器的位图分配/释放逻辑问题

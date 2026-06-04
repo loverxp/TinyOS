@@ -55,8 +55,11 @@ kernel_main()
 │           └─> TSS 段 (GDT[5], DPL=0)
 │
 ├─> 3. 初始化 VGA 显示
-│   └─> vga_initialize()
-│       └─> 清屏、设置颜色、重置光标
+    │   └─> vga_initialize()
+    │       └─> 清屏、设置颜色、重置光标
+    │   └─> vga_save_font()
+    │       └─> 从 VGA plane 2 读取 4096 字节字模数据并保存到内核缓冲区
+    │       └─> 用于 Mode 13h→文本模式切换时恢复被破坏的字模
 │
 ├─> 4. 初始化物理内存管理器 (PMM)
 │   └─> pmm_init(multiboot_info_addr)
@@ -401,7 +404,7 @@ user/hello.c  +  user/crt0.s
 
 ## 贪吃蛇游戏流程
 
-### 执行流程
+### 旧版：内核态 Snake（字符模式）
 
 ```
 Shell 命令 "snake"
@@ -411,42 +414,49 @@ Shell 命令 "snake"
        └─ snake_start(0)              [kernel/shell.c]
             │
             ├─ 初始化游戏状态 (蛇位置、方向、食物)
-            │
             ├─ outb(0x20, 0x20)      ← 发送 IRQ1 EOI！
-            │   └─ 必须：因为 snake_start 在 IRQ1 处理链中调用，
-            │      PIC 的 IRQ1 ISR 位仍然置位，不发送 EOI 则
-            │      后续键盘中断被阻塞
-            │
-            ├─ keyboard_register_raw_callback(snake_raw_cb)
-            │   └─ 注册原始扫描码回调（支持方向键）
-            ├─ keyboard_register_char_callback(NULL)
-            │   └─ 禁用字符回调（防止 Shell 处理输入）
-            ├─ timer_register_tick_callback(snake_tick)
-            │   └─ 注册定时器回调（每 10 tick = 200ms 移动蛇）
-            │
-            ├─ render_all()           ← 初始全屏渲染
-            ├─ enable_interrupts()    ← sti
-            │
-            └─ while (running) {       ← 游戏主循环
-                 hlt;                  ← 等待中断
-                 if (needs_render)
-                     render_update();  ← 增量渲染
-               }
-                 │
-                 ├─ 定时器中断 (IRQ0) 每 20ms:
-                 │   └─ timer_handler() → snake_tick()
-                 │       └─ 每 10 tick 移动蛇 + 设置 needs_render
-                 │
-                 ├─ 键盘中断 (IRQ1):
-                 │   └─ keyboard_handler() → snake_raw_cb()
-                 │       ├─ 方向键/WASD → 更新 next_dir
-                 │       └─ Q/ESC → running = 0
-                 │
-                 └─ 退出后:
-                     ├─ 取消注册回调
-                     ├─ keyboard_register_char_callback(shell_char_callback)
-                     └─ 恢复 Shell 提示符
+            │   └─（解释同上）
+            ├─ 注册键盘/定时器回调
+            └─ while (running) { hlt; ... }
 ```
+
+### 新版：gfxsnake（VGA Mode 13h 用户态用户程序）
+
+```
+Shell 命令 "gfxsnake"
+  │
+  └─ runuser → run_loaded_user()
+       │
+       └─ 加载 gfxsnake.bin 到 0x400000
+          └─ iret → Ring 3 → _start → main()
+               │
+               ├─ sys_set_video_mode(1) → 切换到 VGA Mode 13h
+               ├─ init_game() → 初始化蛇、食物
+               ├─ render_frame() → 全屏渲染
+               │
+               └─ while (running) {
+                    ├─ 轮询键盘 (sys_read_key)
+                    ├─ 游戏逻辑 (计时器 tick 驱动)
+                    └─ render_frame() (每 tick)
+                  }
+                    │
+                    └─ sys_exit(0)
+                         └─ 内核恢复文本模式
+                            ├─ vga_set_mode03h()
+                            │   ├─ 设置寄存器
+                            │   ├─ 初始化 Attribute Controller 调色板
+                            │   ├─ vga_restore_font() ← 恢复字模
+                            │   └─ 清屏
+                            └─ 返回 loader → Shell
+```
+
+### VGA Mode 13h 要点
+
+- **分辨率**: 320×200, 256 色
+- **帧缓冲**: 线性地址 `0xA0000`，64KB 窗口
+- **Chain-4 模式**: 每 4 个像素字节交织到 VGA 的 4 个位平面
+- **字模破坏**: 写入 `0xA0000` 时第 2、6、10… 字节写入 plane 2（即字模平面），破环字体数据
+- **恢复方案**: 开机 `vga_save_font()` 读取 plane 2 保存字模，切换回文本模式时 `vga_restore_font()` 写回
 
 ### 关键设计要点
 

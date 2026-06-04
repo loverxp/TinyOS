@@ -61,4 +61,7 @@ size_t vga_get_cursor_row(void);
 // Get current cursor column
 size_t vga_get_cursor_column(void);
 
+// Save VGA font data from plane 2 (must call at boot before any mode switching)
+void vga_save_font(void);
+
 #endif // VGA_H

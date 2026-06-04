@@ -17,7 +17,7 @@ echo Building user: crt0.o
 if errorlevel 1 exit /b 1
 
 echo Building user: hello
-%GCC% -m32 -ffreestanding -O2 -Wall -Wextra -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -I..\include -c hello.c -o %OUT%\hello.o
+%GCC% -m32 -mgeneral-regs-only -ffreestanding -O2 -Wall -Wextra -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -I..\include -c hello.c -o %OUT%\hello.o
 if errorlevel 1 exit /b 1
 
 echo Linking: hello.elf
@@ -28,4 +28,16 @@ echo Converting: hello.bin
 %OBJCOPY% -O binary %OUT%\hello.elf %OUT%\hello.bin
 if errorlevel 1 exit /b 1
 
-echo Done: %OUT%\hello.bin
+echo Building user: gfxsnake
+%GCC% -m32 -mgeneral-regs-only -ffreestanding -O2 -Wall -Wextra -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -I..\include -c gfxsnake.c -o %OUT%\gfxsnake.o
+if errorlevel 1 exit /b 1
+
+echo Linking: gfxsnake.elf
+%LD% -T user.ld -nostdlib -o %OUT%\gfxsnake.elf %OUT%\gfxsnake.o %OUT%\crt0.o
+if errorlevel 1 exit /b 1
+
+echo Converting: gfxsnake.bin
+%OBJCOPY% -O binary %OUT%\gfxsnake.elf %OUT%\gfxsnake.bin
+if errorlevel 1 exit /b 1
+
+echo Done: %OUT%\hello.bin, %OUT%\gfxsnake.bin

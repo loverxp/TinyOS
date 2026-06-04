@@ -20,7 +20,7 @@ USER_OBJCOPY = tools/bin/i686-elf-objcopy.exe
 endif
 
 # Flags
-CFLAGS   = -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions \
+CFLAGS   = -m32 -mgeneral-regs-only -ffreestanding -O2 -Wall -Wextra -fno-exceptions \
            -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude
 ASFLAGS  = -f elf32
 LDFLAGS  = -T linker.ld -nostdlib
@@ -42,7 +42,7 @@ ASM_OBJS  = $(patsubst %.asm,$(BUILD)/%_asm.o,$(notdir $(ASM_SRCS)))
 OBJECTS   = $(ASM_OBJS) $(C_OBJS)
 
 # User program files
-USER_BIN  = build/user/hello.bin
+USER_BIN  = build/user/gfxsnake.bin
 
 # Target
 TARGET    = $(BUILD)/tinyos.bin
@@ -90,13 +90,13 @@ $(BUILD):
 
 # Run
 run: $(TARGET)
-	$(QEMU) -kernel $(TARGET) -m 32
+	$(QEMU) -kernel $(TARGET) -m 32 -vga std
 
 run-debug: $(TARGET) | logs
-	$(QEMU) -kernel $(TARGET) -m 32 -serial file:logs/serial.log
+	$(QEMU) -kernel $(TARGET) -m 32 -vga std -serial file:logs/serial.log
 
 run-serial: $(TARGET)
-	$(QEMU) -kernel $(TARGET) -m 32 -nographic
+	$(QEMU) -kernel $(TARGET) -m 32 -vga std -nographic
 
 # Ensure logs directory exists
 logs:

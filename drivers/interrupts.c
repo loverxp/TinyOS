@@ -158,18 +158,54 @@ void pic_send_eoi(uint8_t irq) {
     outb(0x20, 0x20);
 }
 
+extern void user_exit_handler(void);
+
 void isr_handler(uint32_t int_no, uint32_t err_code, uint32_t* regs) {
     if (int_no < 32) {
+        // Log exception details to serial port for debugging
+        serial_string("EXCEPTION: int_no=");
+        serial_hex(int_no);
+        serial_string(" err=");
+        serial_hex(err_code);
+        serial_string(" EIP=");
+        serial_hex(regs[11]);
+        serial_string(" CS=");
+        serial_hex(regs[12]);
+        // Log first 4 bytes at EIP (the faulting instruction)
+        serial_string(" bytes=");
+        uint8_t* eip_bytes = (uint8_t*)regs[11];
+        for (int i = 0; i < 4; i++) {
+            serial_hex(eip_bytes[i]);
+            serial_string(" ");
+        }
+        // Check if from user mode
+        uint8_t user_mode = (regs[12] & 0x03) == 3;
+        serial_string(user_mode ? " [USER]" : " [KERNEL]");
+        serial_string("\r\n");
+
         exception_handler(int_no, err_code);
 
-        // Handle user-mode General Protection Fault - skip the faulting instruction
-        if (int_no == 13 && (regs[12] & 0x03) == 3) {
-            // regs[12] = CS, RPL=3 means we came from user mode
-            // Skip the faulting instruction (hlt is 1 byte: 0xF4)
-            regs[11] += 1;  // Increment EIP past the hlt
+        // Check if exception came from user mode (Ring 3)
+        // (user_mode already computed above)
+
+        if (int_no == 13 && user_mode) {
+            // User-mode GPF: skip the faulting instruction (e.g. hlt = 1 byte)
+            regs[11] += 1;  // Increment EIP past the faulting instruction
             vga_set_color(VGA_COLOR_RED, VGA_COLOR_BLACK);
             vga_writestring("    Skipped faulty instruction\n");
             vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+        } else if ((int_no == 6 || int_no == 14) && user_mode) {
+            // User-mode Invalid Opcode or Page Fault:
+            // terminate the user program instead of infinite loop
+            serial_string("Terminating user program (exception ");
+            serial_hex(int_no);
+            serial_string(")\r\n");
+            vga_set_color(VGA_COLOR_RED, VGA_COLOR_BLACK);
+            vga_writestring("    Terminating user program (Invalid Opcode)\n");
+            vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+            // Redirect to user_exit_handler to gracefully return to kernel
+            regs[11] = (uint32_t)user_exit_handler;  // EIP
+            regs[12] = 0x08;                          // CS = kernel code (RPL=0)
         }
     }
 
@@ -194,13 +230,348 @@ void register_interrupt_handler(uint8_t n, void (*handler)(void)) {
 // regs[0]=ds, [1]=edi, [2]=esi, [3]=ebp, [4]=esp, [5]=ebx, [6]=edx, [7]=ecx, [8]=eax(syno), [9]=int_no, [10]=err_code
 // IRET frame at regs[11]=EIP, [12]=CS, [13]=EFLAGS, [14]=ESP, [15]=SS
 
-extern void user_exit_handler(void);
+// Forward declarations for syscall helpers
+extern uint32_t timer_get_ticks(void);
+extern uint32_t keyboard_read_key(void);
+extern void keyboard_clear_buffer(void);
+
+// ── VGA Font Save/Restore ─────────────────────────────────────────────
+// Mode 13h (chain-4) writing to 0xA0000 corrupts the font data in VGA plane 2.
+// We save the font at boot time and restore it when switching back to text mode.
+
+#define FONT_SIZE 4096  // 256 chars × 16 bytes each (8x16 font)
+static uint8_t vga_font_buf[FONT_SIZE];
+
+void vga_save_font(void) {
+    uint8_t old_seq02, old_seq04;
+    uint8_t old_gc04, old_gc05, old_gc06;
+
+    // Save registers we'll modify
+    outb(0x3C4, 0x02); old_seq02 = inb(0x3C5);  // Map Mask
+    outb(0x3C4, 0x04); old_seq04 = inb(0x3C5);  // Memory Mode
+    outb(0x3CE, 0x04); old_gc04 = inb(0x3CF);   // Read Map Select
+    outb(0x3CE, 0x05); old_gc05 = inb(0x3CF);   // Mode
+    outb(0x3CE, 0x06); old_gc06 = inb(0x3CF);   // Misc
+
+    // Configure for reading plane 2 at A0000
+    outb(0x3C4, 0x04); outb(0x3C5, 0x06);  // Memory Mode: no chain-4, no odd/even
+    outb(0x3C4, 0x02); outb(0x3C5, 0x04);  // Map Mask: plane 2 only
+    outb(0x3CE, 0x04); outb(0x3CF, 0x02);  // Read Map Select: plane 2
+    outb(0x3CE, 0x05); outb(0x3CF, 0x00);  // Mode: no odd/even
+    outb(0x3CE, 0x06); outb(0x3CF, 0x05);  // Misc: A0000, graphics mode
+
+    // Read font from VGA plane 2
+    volatile uint8_t* font_vram = (volatile uint8_t*)0xA0000;
+    for (int i = 0; i < FONT_SIZE; i++) {
+        vga_font_buf[i] = font_vram[i];
+    }
+
+    // Restore registers
+    outb(0x3C4, 0x02); outb(0x3C5, old_seq02);
+    outb(0x3C4, 0x04); outb(0x3C5, old_seq04);
+    outb(0x3CE, 0x04); outb(0x3CF, old_gc04);
+    outb(0x3CE, 0x05); outb(0x3CF, old_gc05);
+    outb(0x3CE, 0x06); outb(0x3CF, old_gc06);
+
+    serial_string("[FONT] Saved ");
+    serial_hex(FONT_SIZE);
+    serial_string(" bytes of font data\r\n");
+}
+
+static void vga_restore_font(void) {
+    uint8_t old_seq02, old_seq04;
+    uint8_t old_gc05, old_gc06;
+
+    // Save registers we'll modify
+    outb(0x3C4, 0x02); old_seq02 = inb(0x3C5);
+    outb(0x3C4, 0x04); old_seq04 = inb(0x3C5);
+    outb(0x3CE, 0x05); old_gc05 = inb(0x3CF);
+    outb(0x3CE, 0x06); old_gc06 = inb(0x3CF);
+
+    // Configure for writing to plane 2 at A0000
+    outb(0x3C4, 0x04); outb(0x3C5, 0x06);  // Memory Mode: no chain-4, no odd/even
+    outb(0x3C4, 0x02); outb(0x3C5, 0x04);  // Map Mask: plane 2 only
+    outb(0x3CE, 0x05); outb(0x3CF, 0x00);  // Mode: no odd/even
+    outb(0x3CE, 0x06); outb(0x3CF, 0x05);  // Misc: A0000, graphics mode
+    outb(0x3CE, 0x00); outb(0x3CF, 0x00);  // Set/Reset: none
+    outb(0x3CE, 0x01); outb(0x3CF, 0x00);  // Enable Set/Reset: none
+    outb(0x3CE, 0x08); outb(0x3CF, 0xFF);  // Bit Mask: all bits
+
+    // Write font back to plane 2
+    volatile uint8_t* font_vram = (volatile uint8_t*)0xA0000;
+    for (int i = 0; i < FONT_SIZE; i++) {
+        font_vram[i] = vga_font_buf[i];
+    }
+
+    // Restore registers
+    outb(0x3C4, 0x02); outb(0x3C5, old_seq02);
+    outb(0x3C4, 0x04); outb(0x3C5, old_seq04);
+    outb(0x3CE, 0x05); outb(0x3CF, old_gc05);
+    outb(0x3CE, 0x06); outb(0x3CF, old_gc06);
+}
+
+// VGA Mode 13h helpers
+static void vga_set_mode13h(void) {
+    // Set VGA mode 13h: 320x200, 256 colors, chain-4 linear framebuffer
+    //
+    // Correct register programming order (critical for proper initialization):
+    //   1. Misc Output Register  (set dot clock BEFORE CRTC timing)
+    //   2. Sequencer             (reset → program chain-4 → release)
+    //   3. Graphics Controller   (256-color mode, A0000 mapping)
+    //   4. CRTC                  (unlock → timing params → lock)
+    //   5. Attribute Controller  (graphics mode, re-enable video output)
+    //   6. DAC Palette           (color table)
+    
+    // ── 1. Misc Output Register (0x3C2) ──
+    // Must write BEFORE CRTC, because CRTC timing values assume
+    // the dot clock set here (25.175 MHz for 320-pixel modes).
+    outb(0x3C2, 0x63);
+    
+    // ── 2. Sequencer (port 0x3C4/0x3C5) ──
+    // Assert synchronous reset
+    outb(0x3C4, 0x00); outb(0x3C5, 0x01);
+    // Program sequencer registers while held in reset
+    outb(0x3C4, 0x01); outb(0x3C5, 0x01); // Clocking Mode: 8-dot clock
+    outb(0x3C4, 0x02); outb(0x3C5, 0x0F); // Map Mask: all 4 planes
+    outb(0x3C4, 0x03); outb(0x3C5, 0x00); // Character Map Select
+    outb(0x3C4, 0x04); outb(0x3C5, 0x0E); // Memory Mode: chain-4, ext mem
+    // Release reset
+    outb(0x3C4, 0x00); outb(0x3C5, 0x03);
+    
+    // ── 3. Graphics Controller (port 0x3CE/0x3CF) ──
+    outb(0x3CE, 0x00); outb(0x3CF, 0x00);
+    outb(0x3CE, 0x01); outb(0x3CF, 0x00);
+    outb(0x3CE, 0x02); outb(0x3CF, 0x00);
+    outb(0x3CE, 0x03); outb(0x3CF, 0x00);
+    outb(0x3CE, 0x04); outb(0x3CF, 0x00);
+    outb(0x3CE, 0x05); outb(0x3CF, 0x40); // Mode: 256-color
+    outb(0x3CE, 0x06); outb(0x3CF, 0x05); // Misc: A0000 mapping, graphics
+    outb(0x3CE, 0x07); outb(0x3CF, 0x0F);
+    outb(0x3CE, 0x08); outb(0x3CF, 0xFF);
+    
+    // ── 4. CRT Controller (port 0x3D4/0x3D5) ──
+    // Unlock CRTC registers 0-7
+    outb(0x3D4, 0x11);
+    outb(0x3D5, inb(0x3D5) & 0x7F);
+    
+    outb(0x3D4, 0x00); outb(0x3D5, 0x5F); // Horizontal Total
+    outb(0x3D4, 0x01); outb(0x3D5, 0x4F); // Horizontal Display End
+    outb(0x3D4, 0x02); outb(0x3D5, 0x50); // Start Horizontal Blank
+    outb(0x3D4, 0x03); outb(0x3D5, 0x82); // End Horizontal Blank
+    outb(0x3D4, 0x04); outb(0x3D5, 0x54); // Start H Retrace
+    outb(0x3D4, 0x05); outb(0x3D5, 0x80); // End H Retrace
+    outb(0x3D4, 0x06); outb(0x3D5, 0xBF); // Vertical Total
+    outb(0x3D4, 0x07); outb(0x3D5, 0x1F); // Overflow
+    outb(0x3D4, 0x08); outb(0x3D5, 0x00); // Preset Row Scan
+    outb(0x3D4, 0x09); outb(0x3D5, 0x41); // Max Scan Line
+    outb(0x3D4, 0x0A); outb(0x3D5, 0x00); // Cursor Start
+    outb(0x3D4, 0x0B); outb(0x3D5, 0x00); // Cursor End
+    outb(0x3D4, 0x0C); outb(0x3D5, 0x00); // Start Addr High
+    outb(0x3D4, 0x0D); outb(0x3D5, 0x00); // Start Addr Low
+    outb(0x3D4, 0x0E); outb(0x3D5, 0x00); // Cursor Loc High
+    outb(0x3D4, 0x0F); outb(0x3D5, 0x00); // Cursor Loc Low
+    outb(0x3D4, 0x10); outb(0x3D5, 0x9C); // V Retrace Start
+    outb(0x3D4, 0x11); outb(0x3D5, 0x8E); // V Retrace End (re-locked)
+    outb(0x3D4, 0x12); outb(0x3D5, 0x8F); // V Display End
+    outb(0x3D4, 0x13); outb(0x3D5, 0x28); // Offset (40 words)
+    outb(0x3D4, 0x14); outb(0x3D5, 0x40); // Underline Loc
+    outb(0x3D4, 0x15); outb(0x3D5, 0x96); // Start V Blank
+    outb(0x3D4, 0x16); outb(0x3D5, 0xB9); // End V Blank
+    outb(0x3D4, 0x17); outb(0x3D5, 0xA3); // CRTC Mode Control
+    outb(0x3D4, 0x18); outb(0x3D5, 0xFF); // Line Compare
+    
+    // ── 5. Attribute Controller (port 0x3C0) ──
+    // Reset flip-flop so next write to 0x3C0 is INDEX
+    inb(0x3DA);
+    // During programming, each index write has bit5=0, which disables video output.
+    // This is intentional — prevents display glitches while registers are changing.
+    outb(0x3C0, 0x10); outb(0x3C0, 0x41); // Mode Control: graphics, 256-color
+    outb(0x3C0, 0x11); outb(0x3C0, 0x00); // Overscan
+    outb(0x3C0, 0x12); outb(0x3C0, 0x0F); // Color Plane Enable: all 4 planes
+    outb(0x3C0, 0x13); outb(0x3C0, 0x00); // Horizontal PEL Panning
+    outb(0x3C0, 0x14); outb(0x3C0, 0x00); // Color Select
+    // CRITICAL: After programming, write 0x20 to re-enable video output.
+    // The flip-flop is currently in INDEX state (even number of writes),
+    // and 0x20 sets bit5=1 which re-enables the display.
+    outb(0x3C0, 0x20);
+    
+    // ── 6. DAC Palette (port 0x3C8/0x3C9) ──
+    {
+        static const uint8_t std_palette[16][3] = {
+            {0x00,0x00,0x00}, {0x00,0x00,0x2A}, {0x00,0x2A,0x00}, {0x00,0x2A,0x2A},
+            {0x2A,0x00,0x00}, {0x2A,0x00,0x2A}, {0x2A,0x15,0x00}, {0x2A,0x2A,0x2A},
+            {0x15,0x15,0x15}, {0x15,0x15,0x3F}, {0x15,0x3F,0x15}, {0x15,0x3F,0x3F},
+            {0x3F,0x15,0x15}, {0x3F,0x15,0x3F}, {0x3F,0x3F,0x15}, {0x3F,0x3F,0x3F},
+        };
+        outb(0x3C8, 0);
+        for (int i = 0; i < 16; i++) {
+            outb(0x3C9, std_palette[i][0]);
+            outb(0x3C9, std_palette[i][1]);
+            outb(0x3C9, std_palette[i][2]);
+        }
+        for (int i = 16; i < 64; i++) {
+            int c = (i - 16) / 16;
+            int v = ((i - 16) % 16) * 4;
+            outb(0x3C9, (uint8_t)(c == 0 ? v : 0));
+            outb(0x3C9, (uint8_t)(c == 1 ? v : 0));
+            outb(0x3C9, (uint8_t)(c == 2 ? v : 0));
+        }
+    }
+    
+    // ── 7. Write VRAM test pattern ──
+    uint8_t* vram = (uint8_t*)0xA0000;
+    for (int i = 0; i < 320 * 200; i++) {
+        vram[i] = 10;  // bright green background
+    }
+    for (int i = 0; i < 200; i++) {
+        vram[i * 320 + i] = 12;          // red diagonal
+        vram[i * 320 + (319 - i)] = 12;   // red diagonal
+        vram[i * 320 + 160] = 15;         // white vertical center
+    }
+    for (int x = 0; x < 320; x++) {
+        vram[100 * 320 + x] = 15;         // white horizontal line
+    }
+    serial_string("[DBG:SYS4] kernel VRAM test pattern drawn\r\n");
+}
+
+void vga_set_mode03h(void) {
+    // Restore text mode 3 (80x25, 16 colors)
+    //
+    // Correct register programming order:
+    //   1. Misc Output       (set dot clock FIRST — CRTC timing depends on it)
+    //   2. Sequencer         (reset → program → release)
+    //   3. Graphics Controller
+    //   4. CRTC              (unlock → program → lock)
+    //   5. Attribute Ctrl    (program with video disabled → re-enable LAST)
+    
+    // ── 1. Misc Output Register ──
+    // 0x67 = 28.322 MHz dot clock, negative H-sync, positive V-sync, color card
+    outb(0x3C2, 0x67);
+    
+    // ── 2. Sequencer ──
+    // Assert synchronous reset
+    outb(0x3C4, 0x00); outb(0x3C5, 0x01);
+    // Program while in reset
+    outb(0x3C4, 0x01); outb(0x3C5, 0x00); // Clocking Mode: 9-dot clock
+    outb(0x3C4, 0x02); outb(0x3C5, 0x03); // Map Mask: planes 0+1 (text uses 2 planes)
+    outb(0x3C4, 0x03); outb(0x3C5, 0x00); // Character Map Select
+    outb(0x3C4, 0x04); outb(0x3C5, 0x03); // Memory Mode: ext mem, odd/even, no chain-4
+    // Release reset
+    outb(0x3C4, 0x00); outb(0x3C5, 0x03);
+    
+    // ── 3. Graphics Controller ──
+    outb(0x3CE, 0x00); outb(0x3CF, 0x00); // Set/Reset
+    outb(0x3CE, 0x01); outb(0x3CF, 0x00); // Enable Set/Reset
+    outb(0x3CE, 0x02); outb(0x3CF, 0x00); // Color Compare
+    outb(0x3CE, 0x03); outb(0x3CF, 0x00); // Data Rotate
+    outb(0x3CE, 0x04); outb(0x3CF, 0x00); // Read Map Select
+    outb(0x3CE, 0x05); outb(0x3CF, 0x10); // Mode: odd/even, no 256-color
+    outb(0x3CE, 0x06); outb(0x3CF, 0x0E); // Misc: B8000, text mode, odd/even
+    outb(0x3CE, 0x07); outb(0x3CF, 0x00); // Color Don't Care
+    outb(0x3CE, 0x08); outb(0x3CF, 0xFF); // Bit Mask
+    
+    // ── 4. CRTC ──
+    // Unlock CRTC registers 0-7
+    outb(0x3D4, 0x11); outb(0x3D5, inb(0x3D5) & 0x7F);
+    
+    outb(0x3D4, 0x00); outb(0x3D5, 0x5F); // Horizontal Total
+    outb(0x3D4, 0x01); outb(0x3D5, 0x4F); // Horizontal Display End
+    outb(0x3D4, 0x02); outb(0x3D5, 0x50); // Start Horizontal Blank
+    outb(0x3D4, 0x03); outb(0x3D5, 0x82); // End Horizontal Blank
+    outb(0x3D4, 0x04); outb(0x3D5, 0x55); // Start H Retrace
+    outb(0x3D4, 0x05); outb(0x3D5, 0x81); // End H Retrace
+    outb(0x3D4, 0x06); outb(0x3D5, 0xBF); // Vertical Total
+    outb(0x3D4, 0x07); outb(0x3D5, 0x1F); // Overflow
+    outb(0x3D4, 0x08); outb(0x3D5, 0x00); // Preset Row Scan
+    outb(0x3D4, 0x09); outb(0x3D5, 0x4F); // Max Scan Line (16 scan lines)
+    outb(0x3D4, 0x0A); outb(0x3D5, 0x0E); // Cursor Start
+    outb(0x3D4, 0x0B); outb(0x3D5, 0x0F); // Cursor End
+    outb(0x3D4, 0x0C); outb(0x3D5, 0x00); // Start Addr High
+    outb(0x3D4, 0x0D); outb(0x3D5, 0x00); // Start Addr Low
+    outb(0x3D4, 0x0E); outb(0x3D5, 0x00); // Cursor Loc High
+    outb(0x3D4, 0x0F); outb(0x3D5, 0x00); // Cursor Loc Low
+    outb(0x3D4, 0x10); outb(0x3D5, 0x9C); // V Retrace Start
+    outb(0x3D4, 0x11); outb(0x3D5, 0x8E); // V Retrace End (re-locked)
+    outb(0x3D4, 0x12); outb(0x3D5, 0x8F); // V Display End
+    outb(0x3D4, 0x13); outb(0x3D5, 0x28); // Offset (40 words)
+    outb(0x3D4, 0x14); outb(0x3D5, 0x1F); // Underline Loc
+    outb(0x3D4, 0x15); outb(0x3D5, 0x96); // Start V Blank
+    outb(0x3D4, 0x16); outb(0x3D5, 0xB9); // End V Blank
+    outb(0x3D4, 0x17); outb(0x3D5, 0xA3); // CRTC Mode Control
+    outb(0x3D4, 0x18); outb(0x3D5, 0xFF); // Line Compare
+    
+    // ── 5. Attribute Controller (0x3C0) ──
+    // Reset flip-flop to INDEX state
+    inb(0x3DA);
+    
+    // Program Attribute Controller palette registers (0x00-0x0F).
+    // These map 4-bit text attribute colors to DAC indices.
+    // After Mode 13h, these may be in an undefined state, so we set
+    // an identity mapping: color i → DAC index i.
+    for (int i = 0; i < 16; i++) {
+        outb(0x3C0, i);       // Palette register index
+        outb(0x3C0, i);       // Value = DAC index (identity)
+    }
+    
+    // Program control registers — during this, video is disabled (bit5=0)
+    outb(0x3C0, 0x10); outb(0x3C0, 0x0C); // Mode Control: text, color, 9-dot
+    outb(0x3C0, 0x11); outb(0x3C0, 0x00); // Overscan
+    outb(0x3C0, 0x12); outb(0x3C0, 0x0F); // Color Plane Enable: all
+    outb(0x3C0, 0x13); outb(0x3C0, 0x08); // Horizontal PEL Panning
+    outb(0x3C0, 0x14); outb(0x3C0, 0x00); // Color Select
+    // CRITICAL: Re-enable video output NOW (all registers have been set)
+    outb(0x3C0, 0x20);
+    
+    // ── 6. Restore font data to VGA plane 2 ──
+    // Mode 13h (chain-4) writing to 0xA0000 corrupts font data.
+    // We saved it at boot and must restore it here.
+    vga_restore_font();
+    
+    // ── 7. Clear text screen ──
+    uint16_t* text_mem = (uint16_t*)0xB8000;
+    for (int i = 0; i < 80 * 25; i++) {
+        text_mem[i] = 0x0720;
+    }
+}
+
+// Kernel-mode VGA graphics test — bypasses user mode entirely.
+// Called from shell command "gtest" for direct hardware debugging.
+void vga_gfx_test(void) {
+    serial_string("[GTEST] Kernel-mode VGA test starting...\r\n");
+    
+    // Switch to Mode 13h and draw test pattern
+    vga_set_mode13h();
+    serial_string("[GTEST] Mode 13h set, test pattern drawn. Press any key to return...\r\n");
+    
+    // Wait for any keypress (poll keyboard port directly)
+    while ((inb(0x64) & 1) == 0) {
+        asm volatile("hlt");
+    }
+    inb(0x60); // ack the key
+    
+    // Restore text mode
+    vga_set_mode03h();
+    serial_string("[GTEST] Text mode restored.\r\n");
+}
 
 void syscall_handler(uint32_t* regs) {
     uint32_t syscall_no = regs[8];  // EAX contains syscall number
+    uint32_t arg1 = regs[5];        // EBX
+    uint32_t arg2 = regs[6];        // ECX (moved to EDX in syscall convention?)
+    // Actually in our ISR stub: pusha saves: edi, esi, ebp, esp, ebx, edx, ecx, eax
+    // So regs[5]=ebx, regs[6]=edx, regs[7]=ecx
+    // Let's use ebx for first arg, ecx for second arg
+    arg2 = regs[7]; // ECX
 
     if (syscall_no == 0) {
         // Syscall 0: exit user mode, return to kernel
+        // CRITICAL: Switch back to text mode NOW while still in Ring 0,
+        // before the VGA memory is accessed by vga_writestring or other code.
+        vga_set_mode03h();
+        
+        serial_string("[DBG:SYS0] user_exit called, code=");
+        serial_hex(arg1);
+        serial_string("\r\n");
         vga_writestring("\n*** Return to kernel mode ***\n\n");
 
         // Modify the saved IRET frame to return to kernel code
@@ -210,8 +581,59 @@ void syscall_handler(uint32_t* regs) {
         return;
     }
 
-    // Syscall 1: write message
+    if (syscall_no == 1) {
+        // Syscall 1: print message (legacy)
+        vga_writestring("[Syscall] #1 from user mode\n");
+        return;
+    }
+
+    if (syscall_no == 2) {
+        // Syscall 2: get timer ticks -> return in EAX
+        regs[8] = timer_get_ticks();
+        return;
+    }
+
+    if (syscall_no == 3) {
+        // Syscall 3: read key (non-blocking) -> return scancode in EAX
+        // High bit set if extended (0xE0 prefix)
+        regs[8] = keyboard_read_key();
+        return;
+    }
+
+    if (syscall_no == 4) {
+        // Syscall 4: set video mode
+        // arg1: 0 = text mode (03h), 1 = graphics mode (13h)
+        serial_string("[DBG:SYS4] set_video_mode: ");
+        serial_hex(arg1);
+        serial_string("\r\n");
+        if (arg1 == 1) {
+            serial_string("[DBG:SYS4] entering vga_set_mode13h...\r\n");
+            vga_set_mode13h();
+            serial_string("[DBG:SYS4] vga_set_mode13h done\r\n");
+        } else {
+            vga_set_mode03h();
+        }
+        return;
+    }
+
+    if (syscall_no == 5) {
+        // Syscall 5: clear keyboard buffer
+        keyboard_clear_buffer();
+        return;
+    }
+
+    if (syscall_no == 6) {
+        // Syscall 6: debug print to serial port (arg1 = string pointer)
+        const char* s = (const char*)arg1;
+        while (*s) {
+            while ((inb(0x3FD) & 0x20) == 0);
+            outb(0x3F8, *s++);
+        }
+        return;
+    }
+
+    // Unknown syscall
     vga_writestring("[Syscall] #");
     vga_write_dec(syscall_no);
-    vga_writestring(" from user mode\n");
+    vga_writestring(" from user mode (unknown)\n");
 }

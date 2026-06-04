@@ -22,4 +22,10 @@ void keyboard_handler(void);
 // Initialize keyboard
 void keyboard_initialize(void);
 
+// Non-blocking read from keyboard buffer (returns scancode | 0x80 if extended, or 0 if empty)
+uint32_t keyboard_read_key(void);
+
+// Clear keyboard buffer
+void keyboard_clear_buffer(void);
+
 #endif // KEYBOARD_H

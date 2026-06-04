@@ -71,6 +71,7 @@ void kernel_main(uint32_t multiboot_info_addr) {
     serial_string("[OK] GDT\n");
 
     vga_initialize();
+    vga_save_font();
     vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     printf("TinyOS v0.1 - Kernel Loaded\n");
     printf("==========================\n\n");
