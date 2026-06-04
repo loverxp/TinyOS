@@ -29,8 +29,11 @@ do_switch:
     iret                  ; EIP, CS, EFLAGS (for new task: jumps to trampoline)
 
 ; void task_trampoline(void)
-; Entered via iret. After iret, ESP points at the entry dword above EFLAGS.
-; Reads entry from the global new_task_entry (set by prepare_switch) and jumps.
+; Entered via iret. Reads entry from the global new_task_entry (set by
+; prepare_switch) and calls it. If the entry function ever returns,
+; task_exit is called as a safety net.
+extern task_exit
 global task_trampoline
 task_trampoline:
-    jmp [new_task_entry]
+    push dword task_exit      ; Return address: safety net if task returns
+    jmp [new_task_entry]      ; Jump to task entry (never returns normally)

@@ -134,6 +134,19 @@ task_t* scheduler_pick_next(void) {
 }
 
 uint32_t prepare_switch(void) {
+    /* Clean up finished tasks: free stack pages and zero their slot.
+     * This runs in IRQ context (cli), so it's safe to walk the array. */
+    for (int i = 1; i < MAX_TASKS; i++) {
+        if (tasks[i].state == TASK_FINISHED && tasks[i].stack_base != 0) {
+            serial_printf("[sched] Freeing stack for '%s' (0x%x)\n",
+                          tasks[i].name, tasks[i].stack_base);
+            pmm_free_page((void*)tasks[i].stack_base);
+            tasks[i].stack_base = 0;
+            tasks[i].pid = 0;
+            tasks[i].name[0] = '\0';
+        }
+    }
+
     task_t* next = scheduler_pick_next();
     if (!next || next == current_task) {
         return 0;
@@ -163,6 +176,19 @@ uint32_t prepare_switch(void) {
 void task_exit(void) {
     disable_interrupts();
     current_task->state = TASK_FINISHED;
+
+    /* Unlink from the circular ring so the scheduler never sees us again. */
+    task_t* prev = current_task;
+    while (prev->next != current_task) {
+        prev = prev->next;
+    }
+    if (prev != current_task) {
+        prev->next = current_task->next;
+    }
+
+    serial_printf("[sched] '%s' (pid=%u) exited\n",
+                  current_task->name, current_task->pid);
+
     need_reschedule = 1;
     enable_interrupts();
     while (1) { halt(); }

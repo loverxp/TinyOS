@@ -133,13 +133,12 @@ struct page_directory_entry {
   - `schedtest [N]` 命令验证（N 秒后自动停止）
 
 - [x] **task_exit()**
-  - 标记 FINISHED，等待下次 IRQ 切走
-  - 未释放栈内存、未从链表移除（已知限制）
+  - 标记 FINISHED + 从循环链表摘除
+  - 栈页在下次 prepare_switch() 时延迟释放（IRQ 安全）
+  - trampoline 压入 task_exit 作为返回地址安全网
 
 - [ ] **待完善**
-  - `task_exit()` 直接触发调度（避免死亡任务浪费 IRQ）
-  - FINISHED 任务从循环链表移除 + 释放栈页
-  - 任务函数意外返回的保护
+  - `task_exit()` 直接构造帧并调用 do_switch（跳过最后一次 IRQ 浪费）
 
 - [ ] **系统调用**
   - `fork()` - 创建进程

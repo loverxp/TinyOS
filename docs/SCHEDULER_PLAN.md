@@ -220,6 +220,7 @@ do_switch 加载新任务 ESP → pop eax (DS) → popa → add esp, 8 → iret
   │
   ▼ iret 跳转到 task_trampoline (EIP 在伪造帧中设为 trampoline 地址)
 task_trampoline:
+  push dword task_exit    ← 返回地址安全网：若任务函数意外 return 则调用 task_exit
   jmp [new_task_entry]    ← 跳转到任务入口函数
   │
   ▼
@@ -232,28 +233,20 @@ task_trampoline:
 
 ## 已知限制
 
-### 1. task_exit() 效率问题
+### 1. task_exit() 仍有一次 IRQ 浪费
 
-`task_exit()` 标记 FINISHED 后在 `hlt` 循环中等待。下次 IRQ 仍会在死亡任务的栈上运行，
-然后 `prepare_switch` 选其他任务切走。每次 IRQ 浪费一个完整的中断处理周期。
-理想方案：`task_exit()` 应直接触发调度切换。
+`task_exit()` 标记 FINISHED 并从链表摘除后，在 `hlt` 循环等待。下次 IRQ 仍在死亡任务的栈上运行，
+但 `scheduler_pick_next()` 不再遍历到该任务（已从环中移除），因此只浪费一次 IRQ 入口/出口的开销，
+不会在调度决策上浪费时间。
 
-### 2. 完成的任务未从链表移除
+理想方案：`task_exit()` 直接构造栈帧并调用 `do_switch()`，完全跳过下一次 IRQ。
 
-FINISHED 状态的任务仍留在循环链表中，`scheduler_pick_next()` 遍历时跳过。
-随时间推移，死亡节点积累增加遍历开销。
+### 2. 完成的任务未从任务数组移除
 
-### 3. 任务栈内存泄漏
+FINISHED 状态的任务已从循环链表摘除，但 `tasks[]` 数组槽位保留到 `prepare_switch()`
+下次运行时才释放栈页并清零槽位。这是有意设计：在 IRQ 上下文中延迟清理更安全。
 
-每个任务分配 4KB 栈页（`pmm_alloc_page`），但完成后不释放。
-复用任务槽位时分配新页，旧页泄漏。
-
-### 4. 任务函数意外返回无保护
-
-`task_trampoline` 用 `jmp` 而非 `call`，若任务函数意外 return，
-CPU 会从栈上弹出垃圾数据作为返回地址。
-
-### 5. 不支持优先级 / sleep / IPC
+### 3. 不支持优先级 / sleep / IPC
 
 当前仅支持 Round-Robin 时间片轮转。无 `yield()`、`sleep()`、信号量等高级原语。
 
@@ -263,8 +256,7 @@ CPU 会从栈上弹出垃圾数据作为返回地址。
 
 | 功能 | 说明 |
 |------|------|
-| `task_exit()` 优化 | 直接触发调度，避免死亡任务浪费 IRQ 周期 |
-| 链表清理 | FINISHED 任务从循环链表移除，释放栈页 |
+| `task_exit()` 直接切换 | 构造栈帧并调用 do_switch，避免死亡任务浪费 IRQ |
 | `yield()` | 主动让出 CPU（int 0x81 或复用 int 0x80） |
 | `task_sleep(ticks)` | 阻塞等待，超时后恢复 READY |
 | 用户进程（Ring 3） | 任务切换支持特权级切换 + 独立页目录 |
