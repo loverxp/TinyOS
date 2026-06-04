@@ -95,8 +95,8 @@ TinyOS/
 │   ├── mm.c               # 堆内存分配器（kmalloc/kfree）
 │   ├── paging.c           # 分页机制（页目录/页表）
 │   ├── except.c           # 异常处理（含 Page Fault 详细诊断）
-│   ├── loader.c           # 用户程序加载器
-│   ├── embedded_user.asm  # 嵌入的用户程序二进制
+│   ├── loader.c           # 用户程序 ELF 加载器
+│   ├── embedded_user.asm  # 嵌入的 gfxsnake.elf
 │   └── user.asm           # 用户态入口和切换逻辑
 ├── user/
 │   ├── crt0.s             # 用户程序启动代码
@@ -124,6 +124,7 @@ TinyOS/
 │   └── stdio.c            # printf/sprintf 格式化输出
 ├── include/               # 头文件
 │   ├── types.h            # 类型定义
+│   ├── elf.h              # ELF32 数据结构
 │   ├── vga.h
 │   ├── keyboard.h
 │   ├── timer.h

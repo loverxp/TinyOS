@@ -216,16 +216,16 @@ struct vfs_node {
   - 内核直接加载到固定地址执行
   - 绕过 ELF 解析复杂度，快速验证流程
 
-- [ ] **ELF 加载器（第二阶段）**
+- [x] **ELF 加载器（第二阶段）**
   - 校验 ELF magic (`0x7F E L F`)
   - 解析 Program Header，映射 LOAD 段
   - 创建用户栈，跳转到 `e_entry`
-  - `run_elf(void* elf_data, uint32_t size)` 接口
+  - `elf_load(elf_data, size)` 接口
 
-- [ ] **加载用户程序到内存**
-  - 从磁盘/内存读取 ELF 文件
+- [x] **加载用户程序到内存**
+  - 从嵌入的 ELF 二进制加载用户程序
   - 通过 IRET 进入 Ring 3 执行
-  - 支持多份用户程序同时存在
+  - hello 和 gfxsnake 均已使用 ELF 加载器
 
 ### 4.2 Shell
 **目标**：命令行解释器

@@ -7,6 +7,7 @@
 #include "../include/pmm.h"
 #include "../include/stdio.h"
 #include "../include/io.h"
+#include "../include/elf.h"
 
 // External assembly functions (from user.asm)
 extern void run_user_task_ex(void (*entry)(void), void* user_esp);
@@ -49,24 +50,80 @@ static void dbg_serial_hex(uint32_t n) {
 }
 // #endregion
 
+// ELF loader: validate, load segments, return entry point.
+// Returns 0 on success, -1 on error.
+static int elf_load(const uint8_t* elf_data, uint32_t size) {
+    const Elf32_Ehdr* ehdr = (const Elf32_Ehdr*)elf_data;
+    
+    if (!elf_validate(ehdr)) {
+        printf("ERROR: Invalid ELF header\n");
+        return -1;
+    }
+    
+    dbg_serial_string("[ELF] entry=0x");
+    dbg_serial_hex(ehdr->e_entry);
+    dbg_serial_string(" phnum=");
+    dbg_serial_hex(ehdr->e_phnum);
+    dbg_serial_string("\r\n");
+    
+    // Validate program header table is within bounds
+    if (ehdr->e_phoff + ehdr->e_phnum * ehdr->e_phentsize > size) {
+        printf("ERROR: Program headers out of bounds\n");
+        return -1;
+    }
+    
+    // Iterate program headers and load PT_LOAD segments
+    for (int i = 0; i < ehdr->e_phnum; i++) {
+        const Elf32_Phdr* phdr = (const Elf32_Phdr*)(elf_data + ehdr->e_phoff + i * ehdr->e_phentsize);
+        
+        if (phdr->p_type != PT_LOAD) continue;
+        
+        dbg_serial_string("[ELF] LOAD segment: vaddr=0x");
+        dbg_serial_hex(phdr->p_vaddr);
+        dbg_serial_string(" filesz=");
+        dbg_serial_hex(phdr->p_filesz);
+        dbg_serial_string(" memsz=");
+        dbg_serial_hex(phdr->p_memsz);
+        dbg_serial_string(" offset=0x");
+        dbg_serial_hex(phdr->p_offset);
+        dbg_serial_string("\r\n");
+        
+        // Verify segment data is within bounds
+        if (phdr->p_offset + phdr->p_filesz > size) {
+            printf("ERROR: Segment data out of bounds\n");
+            return -1;
+        }
+        
+        // Copy segment data to target virtual address
+        memcpy((void*)phdr->p_vaddr, elf_data + phdr->p_offset, phdr->p_filesz);
+        
+        // Zero-fill BSS region (memsz > filesz)
+        if (phdr->p_memsz > phdr->p_filesz) {
+            memset((void*)(phdr->p_vaddr + phdr->p_filesz), 0, phdr->p_memsz - phdr->p_filesz);
+        }
+    }
+    
+    return 0;
+}
+
 void run_loaded_user(void) {
     uint32_t size = embedded_user_end - embedded_user_start;
     
-    printf("Loading user program (%u bytes) to 0x%x...\n", size, USER_PROG_BASE);
-    
-    // #region debug-point E:loader - Verify binary is valid
-    dbg_serial_string("[LOADER] binary size=");
-    dbg_serial_hex(size);
-    dbg_serial_string(" first_bytes=");
-    for (int i = 0; i < 8 && i < (int)size; i++) {
-        dbg_serial_hex(embedded_user_start[i]);
-        dbg_serial_string(" ");
+    if (size < sizeof(Elf32_Ehdr)) {
+        printf("ERROR: gfxsnake.elf is too small!\n");
+        return;
     }
-    dbg_serial_string("\r\n");
-    // #endregion
     
-    // Copy program binary to target address
-    memcpy((void*)USER_PROG_BASE, embedded_user_start, size);
+    printf("Loading gfxsnake.elf (%u bytes)...\n", size);
+    
+    const Elf32_Ehdr* ehdr = (const Elf32_Ehdr*)embedded_user_start;
+    uint32_t entry = ehdr->e_entry;
+    
+    // Load ELF segments
+    if (elf_load(embedded_user_start, size) != 0) {
+        printf("ERROR: Failed to load gfxsnake.elf\n");
+        return;
+    }
     
     // Allocate a page for user stack (4KB)
     void* user_stack = pmm_alloc_page();
@@ -77,7 +134,7 @@ void run_loaded_user(void) {
     
     uint32_t user_esp = (uint32_t)user_stack + 4096;  // stack grows down
     
-    printf("User stack at 0x%x, switching to Ring 3...\n\n", (uint32_t)user_stack);
+    printf("Entry: 0x%x, Stack at 0x%x, switching to Ring 3...\n\n", entry, (uint32_t)user_stack);
     
     // Send EOI for IRQ1 before switching to Ring 3.
     // This function may be called from the keyboard ISR (via shell command handler),
@@ -85,10 +142,12 @@ void run_loaded_user(void) {
     // Without this EOI, the PIC masks keyboard interrupts permanently.
     outb(0x20, 0x20);  // Send EOI to master PIC for IRQ1
     
-    dbg_serial_string("[LOADER] switching to Ring 3 at 0x400000...\r\n");
+    dbg_serial_string("[LOADER] switching to Ring 3 at entry 0x");
+    dbg_serial_hex(entry);
+    dbg_serial_string("...\r\n");
     
     // Run the user program with custom stack
-    run_user_task_ex((void (*)(void))USER_PROG_BASE, (void*)user_esp);
+    run_user_task_ex((void (*)(void))entry, (void*)user_esp);
     
     dbg_serial_string("[LOADER] returned from user program\r\n");
     
@@ -112,15 +171,21 @@ void run_loaded_user(void) {
 void run_hello_user(void) {
     uint32_t size = embedded_hello_end - embedded_hello_start;
     
-    if (size == 0) {
-        printf("ERROR: hello.bin is empty!\n");
+    if (size < sizeof(Elf32_Ehdr)) {
+        printf("ERROR: hello.elf is too small!\n");
         return;
     }
     
-    printf("Loading hello (%u bytes) to 0x%x...\n", size, USER_PROG_BASE);
+    printf("Loading hello.elf (%u bytes)...\n", size);
     
-    // Copy program binary to target address
-    memcpy((void*)USER_PROG_BASE, embedded_hello_start, size);
+    const Elf32_Ehdr* ehdr = (const Elf32_Ehdr*)embedded_hello_start;
+    uint32_t entry = ehdr->e_entry;
+    
+    // Load ELF segments
+    if (elf_load(embedded_hello_start, size) != 0) {
+        printf("ERROR: Failed to load hello.elf\n");
+        return;
+    }
     
     // Allocate a page for user stack (4KB)
     void* user_stack = pmm_alloc_page();
@@ -131,11 +196,13 @@ void run_hello_user(void) {
     
     uint32_t user_esp = (uint32_t)user_stack + 4096;
     
+    printf("Entry: 0x%x, Stack: 0x%x, switching to Ring 3...\n\n", entry, (uint32_t)user_stack);
+    
     // Send EOI for IRQ1
     outb(0x20, 0x20);
     
     // Run the user program with custom stack
-    run_user_task_ex((void (*)(void))USER_PROG_BASE, (void*)user_esp);
+    run_user_task_ex((void (*)(void))entry, (void*)user_esp);
     
     // Restore VGA text mode (preserves existing VGA text buffer content)
     vga_set_mode03h();

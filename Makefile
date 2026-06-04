@@ -44,6 +44,7 @@ OBJECTS   = $(ASM_OBJS) $(C_OBJS)
 
 # User program files
 USER_BINS  = build/user/gfxsnake.bin build/user/hello.bin
+USER_ELFS  = build/user/gfxsnake.elf build/user/hello.elf
 
 # Target
 TARGET    = $(BUILD)/tinyos.bin
@@ -62,10 +63,10 @@ $(TARGET): $(OBJECTS) | $(BUILD)
 	$(LD) $(LDFLAGS) -o $@ $(OBJECTS)
 
 # embedded binaries depend on user binaries
-$(BUILD)/embedded_user_asm.o: kernel/embedded_user.asm build/user/gfxsnake.bin | $(BUILD)
+$(BUILD)/embedded_user_asm.o: kernel/embedded_user.asm build/user/gfxsnake.elf | $(BUILD)
 	$(AS) $(ASFLAGS) -o $@ $<
 
-$(BUILD)/embedded_hello_asm.o: kernel/embedded_hello.asm build/user/hello.bin | $(BUILD)
+$(BUILD)/embedded_hello_asm.o: kernel/embedded_hello.asm build/user/hello.elf | $(BUILD)
 	$(AS) $(ASFLAGS) -o $@ $<
 
 # Compile C files: map e.g. kernel/kernel.c -> build/kernel.o

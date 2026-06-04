@@ -346,16 +346,20 @@ runuser 命令
   │
   └─ run_loaded_user()  [kernel/loader.c]
        │
-       ├─ 获取 incbin 嵌入的二进制: embedded_user_start ~ embedded_user_end
-       │   └─ 定义于 kernel/embedded_user.asm (使用 incbin 指令)
+       ├─ 获取 incbin 嵌入的 ELF 二进制: embedded_user_start ~ embedded_user_end
+       │   └─ 定义于 kernel/embedded_user.asm (使用 incbin 嵌入 .elf)
        │
-       ├─ memcpy(0x400000, embedded_user_start, size)  ← 复制到目标地址
+       ├─ elf_load(embedded_user_start, size)  ← 解析 ELF 头
+       │   ├─ 验证 ELF 魔数、32-bit、Little Endian、i386
+       │   ├─ 遍历 Program Headers
+       │   ├─ 复制 PT_LOAD 段到 p_vaddr
+       │   └─ 清零 BSS (p_memsz - p_filesz)
        │
        ├─ pmm_alloc_page()  ← 分配 4KB 用户栈
        │
        ├─ user_esp = stack_page + 4096  ← 栈顶（栈向下增长）
        │
-       └─ run_user_task_ex(entry=0x400000, user_esp)  [kernel/user.asm]
+       └─ run_user_task_ex(entry=e_entry, user_esp)  [kernel/user.asm]
             │
             ├─ 保存内核栈指针
             ├─ 设置用户段寄存器 (DS/ES/FS/GS = 0x23)
@@ -363,7 +367,7 @@ runuser 命令
             └─ 构建 IRET 帧并执行 iret → Ring 3
                  │
                  ▼
-               0x400000 (_start, crt0.s)  (Ring 3)
+               e_entry (_start, crt0.s)  (Ring 3)
                  │
                  ├─ 清理 BSS 段
                  ├─ 调用 main()
@@ -384,11 +388,10 @@ runuser 命令
 user/hello.c  +  user/crt0.s  +  user/libc/*.c
        │
        ├─ i686-elf-gcc (编译为 .o)
-       ├─ i686-elf-ld -T user.ld (链接为 ELF)
-       └─ i686-elf-objcopy -O binary (转为纯二进制)
+       └─ i686-elf-ld -T user.ld (链接为 ELF)
               │
               ▼
-       build/user/hello.bin
+       build/user/hello.elf
               │
               ▼ (incbin 嵌入)
        kernel/embedded_hello.asm
@@ -402,11 +405,10 @@ user/hello.c  +  user/crt0.s  +  user/libc/*.c
 user/gfxsnake.c + user/crt0.s
        │
        ├─ i686-elf-gcc (编译为 .o)
-       ├─ i686-elf-ld -T user.ld (链接为 ELF)
-       └─ i686-elf-objcopy -O binary (转为纯二进制)
+       └─ i686-elf-ld -T user.ld (链接为 ELF)
               │
               ▼
-       build/user/gfxsnake.bin
+       build/user/gfxsnake.elf
               │
               ▼ (incbin 嵌入)
        kernel/embedded_user.asm
@@ -744,18 +746,20 @@ boot.asm
 
 用户程序加载 (runuser / hello):
     shell.c (runuser / hello 命令)
-        ├─ run_loaded_user() [loader.c]   ← 加载 gfxsnake.bin
-        └─ run_hello_user() [loader.c]    ← 加载 hello.bin
+        ├─ run_loaded_user() [loader.c]   ← 加载 gfxsnake.elf
+        └─ run_hello_user() [loader.c]    ← 加载 hello.elf
+            ├─ elf_load() [loader.c]        ← 解析 ELF Program Headers
+            │   ├─ 验证 ELF 头 (magic, 32-bit, LE, i386)
+            │   ├─ 遍历 PT_LOAD 段并复制到 p_vaddr
+            │   └─ 清零 BSS 段
             ├─ pmm_alloc_page() [pmm.c]     ← 分配用户栈
-            ├─ memcpy() [string.c]          ← 复制二进制到 0x400000
             ├─ printf() [stdio.c]           ← 输出加载信息
-            └─ run_user_task_ex() [user.asm] ← 自定义栈入口
+            └─ run_user_task_ex() [user.asm] ← 使用 ELF e_entry
                 └─ iret → Ring 3
-                    └─ (USER_PROG_BASE = 0x400000)
-                        └─ _start (crt0.s) → main() → exit()
-                            └─ syscall 0 → 返回内核态
-                                └─ user_exit_handler → loader.c
-                                    └─ pmm_free_page() [pmm.c]
+                    └─ e_entry (_start, crt0.s) → main() → exit()
+                        └─ syscall 0 → 返回内核态
+                            └─ user_exit_handler → loader.c
+                                └─ pmm_free_page() [pmm.c]
 ```
 
 ---
