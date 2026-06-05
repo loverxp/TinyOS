@@ -70,6 +70,11 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - `kernel/pmm.c`: 物理内存管理器（位图分配）
 - `kernel/mm.c`: 堆内存分配器（kmalloc/kfree）
 - `lib/stdio.c`: printf/sprintf 格式化输出实现
+- `kernel/net.c`: 网络协议栈（ARP / IPv4 / ICMP / UDP）
+- `drivers/ne2000.c`: NE2000 网卡驱动（PCI 发现、远程 DMA、环形缓冲区接收）
+- `drivers/pci.c`: PCI 总线扫描（配置空间读写、BAR、IRQ 获取）
+- `include/net.h`: 网络协议数据结构（eth/arp/ip/icmp/udp 头）
+- `include/ne2000.h`: NE2000 寄存器定义和常量
 
 ## 内存布局
 - 内核加载地址: 0x100000 (1MB)

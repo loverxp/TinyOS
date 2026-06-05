@@ -24,7 +24,7 @@
 - **FAT16 文件系统**（只读挂载，BPB 解析，目录列表，文件读取，cluster 链遍历）
 - **PCI 总线扫描**（配置空间读取，vendor/device ID，BAR，IRQ line）
 - **NE2000 网卡驱动**（PCI 发现，远程 DMA 读写，接收环形缓冲区，IRQ 处理）
-- **网络协议栈**（ARP 请求/应答，IPv4，ICMP Echo，UDP 收发）
+- **网络协议栈**（ARP 请求/应答，IPv4，ICMP Echo，UDP 收发）✅ 已验证通过
 - **printf 增强**（支持 `%02x` `%04x` 等宽度和零填充修饰符）
 
 ---
@@ -66,6 +66,11 @@
 - [ ] **PRNG (伪随机数生成器)**
   - 实现 xorshift 或 LFSR 算法
   - 为内核提供随机数服务
+- [ ] **串口 Shell**
+  - 启用 COM1 串口 RX 中断
+  - 串口字符回调 → Shell 输入处理（与键盘共享同一输入管道）
+  - 实现通过串口发送命令并接收回显，无需 VGA 显示
+  - 双终端并行：VGA 键盘 + 串口同时可用
 
 ---
 
@@ -293,10 +298,33 @@ struct page_directory_entry {
   - UDP 数据报发送/接收
   - Shell 命令：`send <ip> <port> <msg>`
 
-- [ ] **TCP**（简化版）
-- [ ] **DHCP 客户端**
-- [ ] **DNS 解析**
-- [ ] **HTTP 客户端/服务器**
+### 5.1a 网络功能增强（近期待办）
+
+- [ ] **UDP 接收命令** — 添加 `recv <port>` 命令，TinyOS 可监听 UDP 端口接收主机数据
+- [ ] **ARP 缓存管理** — 添加 `arp` 命令显示/清空 ARP 缓存表
+- [ ] **网络统计信息** — 添加 `netstat` 命令显示收发统计（发送/接收包数、错误数）
+- [ ] **Shell 命令输出优化** — 移除 ping/send 的 `[1/4]` 调试输出，仅在出错时显示诊断信息
+- [ ] **DHCP 客户端** — 自动获取 IP/网关/掩码，替代硬编码 10.0.2.15
+- [ ] **DNS 解析** — 支持域名到 IP 的解析（查询 10.0.2.3）
+- [ ] **TCP 协议栈**
+  - 三次握手（SYN → SYN-ACK → ACK），连接状态机
+  - 序列号/确认号管理 + 校验和（复用 IP 校验和函数）
+  - 超时重传（RTO 定时器）
+  - 四次挥手（FIN 处理 + TIME_WAIT）
+  - 简易连接表（支持 4-8 个并发连接）
+- [ ] **Socket 抽象层**
+  - `tcp_listen(port)` / `tcp_accept()` / `tcp_recv()` / `tcp_send()` / `tcp_close()`
+  - 阻塞等待 + 与调度器协作（recv 阻塞时让出 CPU）
+- [ ] **HTTP 客户端** — 基于 TCP 实现 GET 请求，获取网页内容
+- [ ] **Web 服务器** — 基于 TCP + HTTP 提供静态文件服务
+  - 解析 HTTP 请求行（GET /path HTTP/1.1）和请求头
+  - 从 FAT16 磁盘读取文件，拼装 HTTP 响应（状态行 + Content-Type + Content-Length）
+  - 支持 200 OK / 404 Not Found 响应
+  - 并发连接处理（调度器 + 多任务）
+- [ ] **SSH 服务器** — 基于 TCP 的加密远程 Shell
+  - 需要 TCP + 熵源（PRNG）+ 加密算法（简易 AES 或 XOR 流密码）
+  - 用户名/密码认证
+  - 远程 Shell 交互（串口 Shell 的复用）
 
 ### 5.2 网络使用指南
 
@@ -332,9 +360,17 @@ TinyOS> send 10.0.2.2 8888 Hello from TinyOS!
 ### 5.3 图形界面
 **目标**：图形用户界面 (GUI)
 
-- [x] **VGA 图形模式**
-  - 320x200x256 (Mode 13h)
-  - 或 VESA 高分辨率
+- [x] **VGA 图形模式** (Mode 13h, 320×200, 256 色)
+  - 寄存器编程（Sequencer / CRTC / Graphics Controller / Attribute Controller）
+  - DAC 调色板初始化
+  - 字模保存与恢复（图形↔文本模式切换）
+
+- [ ] **显卡驱动（VBE/VESA）**
+  - 通过 VBE BIOS 中断查询可用显示模式
+  - 支持更高分辨率（640×480、800×600、1024×768）
+  - 线性帧缓冲模式（LFB），突破 64KB 窗口限制
+  - 16/32 位真彩色支持
+  - 与当前 VGA Mode 13h 和文本模式共存
 
 - [ ] **窗口系统**
   - 窗口管理器

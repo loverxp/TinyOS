@@ -33,6 +33,8 @@ static void pci_check_device(uint8_t bus, uint8_t device) {
 
     if (vendor_id == 0xFFFF) return;  /* No device */
 
+    serial_printf("[PCI] Scanning bus=%u dev=%u\n", bus, device);
+
     /* Check up to 8 functions (if multi-function) */
     uint32_t hdr = pci_read_config(bus, device, 0, 0x0C);
     uint8_t max_func = (hdr & 0x00800000) ? 8 : 1;  /* Multi-function bit */
@@ -62,6 +64,12 @@ static void pci_check_device(uint8_t bus, uint8_t device) {
         for (int i = 0; i < 6; i++) {
             dev->bar[i] = pci_read_config(bus, device, func, 0x10 + i * 4);
         }
+
+        serial_printf("[PCI]   Device %d: vendor=0x%04X device=0x%04X class=0x%02X subclass=0x%02X irq=%u BAR0=0x%08X\n",
+                      device_count,
+                      dev->vendor_id, dev->device_id,
+                      dev->class_code, dev->subclass,
+                      dev->irq_line, dev->bar[0]);
 
         device_count++;
     }

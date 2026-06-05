@@ -566,11 +566,39 @@ static void shell_handle_command(const char* cmd) {
         uint32_t a, b, c, d;
         if (parse_ip(ipstr, &a, &b, &c, &d)) {
             uint32_t target_ip = IP4(a, b, c, d);
+            printf("[1/4] Target IP: %u.%u.%u.%u\n", a, b, c, d);
+
+            uint32_t my_ip, my_gw, my_mask;
+            net_get_config(&my_ip, &my_gw, &my_mask);
+            printf("[2/4] Route: dst=%u.%u.%u.%u", a, b, c, d);
+            if ((target_ip & my_mask) != (my_ip & my_mask)) {
+                printf(" via gateway %u.%u.%u.%u\n",
+                       my_gw & 0xFF, (my_gw >> 8) & 0xFF,
+                       (my_gw >> 16) & 0xFF, (my_gw >> 24) & 0xFF);
+            } else {
+                printf(" direct (same subnet)\n");
+            }
+
+            printf("[3/4] Sending ICMP echo...\n");
             int ret = net_send_icmp_echo(target_ip, 1, 1);
             if (ret < 0) {
-                printf("ARP pending, try again...\n");
+                printf("[4/4] ARP table miss -> sending ARP request...\n");
+                uint32_t start = timer_get_ticks();
+                int resolved = 0;
+                int attempts = 0;
+                while (timer_get_ticks() - start < 10) {  /* ~200ms at 50Hz */
+                    printf("  Polling for ARP reply... (attempt %d)\n", ++attempts);
+                    ne2000_poll_recv();
+                    ret = net_send_icmp_echo(target_ip, 1, 1);
+                    if (ret >= 0) { resolved = 1; break; }
+                }
+                if (resolved) {
+                    printf("  ARP resolved OK!\nPing sent to %u.%u.%u.%u\n", a, b, c, d);
+                } else {
+                    printf("  ARP timeout after %d attempts\n", attempts);
+                }
             } else {
-                printf("Ping sent to %u.%u.%u.%u\n", a, b, c, d);
+                printf("[4/4] ARP already cached\nPing sent to %u.%u.%u.%u\n", a, b, c, d);
             }
         } else {
             printf("Usage: ping A.B.C.D\n");
@@ -592,11 +620,39 @@ static void shell_handle_command(const char* cmd) {
             while (*arg == ' ') arg++;
             /* Rest is message */
             uint32_t target_ip = IP4(a, b, c, d);
+            printf("[1/4] Target: %u.%u.%u.%u:%u, msg=\"%s\"\n", a, b, c, d, port, arg);
+
+            uint32_t my_ip, my_gw, my_mask;
+            net_get_config(&my_ip, &my_gw, &my_mask);
+            printf("[2/4] Route: dst=%u.%u.%u.%u", a, b, c, d);
+            if ((target_ip & my_mask) != (my_ip & my_mask)) {
+                printf(" via gateway %u.%u.%u.%u\n",
+                       my_gw & 0xFF, (my_gw >> 8) & 0xFF,
+                       (my_gw >> 16) & 0xFF, (my_gw >> 24) & 0xFF);
+            } else {
+                printf(" direct (same subnet)\n");
+            }
+
+            printf("[3/4] Sending UDP...\n");
             int ret = net_send_udp(target_ip, (uint16_t)port, 1234, arg, strlen(arg));
             if (ret < 0) {
-                printf("ARP pending, try again...\n");
+                printf("[4/4] ARP table miss -> sending ARP request...\n");
+                uint32_t start = timer_get_ticks();
+                int resolved = 0;
+                int attempts = 0;
+                while (timer_get_ticks() - start < 10) {
+                    printf("  Polling for ARP reply... (attempt %d)\n", ++attempts);
+                    ne2000_poll_recv();
+                    ret = net_send_udp(target_ip, (uint16_t)port, 1234, arg, strlen(arg));
+                    if (ret >= 0) { resolved = 1; break; }
+                }
+                if (resolved) {
+                    printf("  ARP resolved OK!\nSent %u bytes to %u.%u.%u.%u:%u\n", strlen(arg), a, b, c, d, port);
+                } else {
+                    printf("  ARP timeout after %d attempts\n", attempts);
+                }
             } else {
-                printf("Sent %u bytes to %u.%u.%u.%u:%u\n", strlen(arg), a, b, c, d, port);
+                printf("[4/4] ARP already cached\nSent %u bytes to %u.%u.%u.%u:%u\n", strlen(arg), a, b, c, d, port);
             }
         } else {
             printf("Usage: send A.B.C.D <port> <message>\n");

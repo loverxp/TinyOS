@@ -899,9 +899,18 @@ net_recv_handler(frame, len):  ← NE2000 回调
     ├─> resolve_dst(): 判断同子网 vs 网关
     ├─> net_arp_lookup(route_ip): 查找 MAC
     │   └─> 未找到: 发送 ARP 请求，返回 -1
+    │       └─> Shell 层自动进入 ARP 轮询等待（~200ms）
+    │           └─> ne2000_poll_recv() + 重试 net_send_icmp_echo()
+    │           └─> ARP 解析成功后再发送数据包
     ├─> build_eth_header(dst_mac, 0x0800)
     ├─> build_ip_header(...)
     └─> ne2000_send(frame, len)
+
+ping/send 命令输出格式（[1/4] 分步显示）:
+  [1/4] Target IP / Target: IP:Port
+  [2/4] Route: 直接/网关 路由信息
+  [3/4] 正在发送协议数据
+  [4/4] ARP table miss/cached + 发送结果
 ```
 
 ### Shell 网络命令

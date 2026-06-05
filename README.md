@@ -490,36 +490,53 @@ Network config:
   Mask:    255.255.255.0
   MAC:     52:54:00:12:34:56
 
-TinyOS> ping 10.0.2.2      ← 首次触发 ARP，需执行两次
-ARP pending, try again...
-
-TinyOS> ping 10.0.2.2      ← 第二次成功
+TinyOS> ping 10.0.2.2    ← ARP 自动解析（首次会触发 ARP 请求）
+[1/4] Target IP: 10.0.2.2
+[2/4] Route: dst=10.0.2.2 direct (same subnet)
+[3/4] Sending ICMP echo...
+[4/4] ARP table miss -> sending ARP request...
+  Polling for ARP reply... (attempt 1)
+  Polling for ARP reply... (attempt 2)
+  ARP resolved OK!
 Ping sent to 10.0.2.2
 
-TinyOS> send 10.0.2.2 8888 Hello from TinyOS!
-Sent 18 bytes to 10.0.2.2:8888
+TinyOS> ping 10.0.2.2    ← 再次 ping，ARP 已缓存
+[1/4] Target IP: 10.0.2.2
+[2/4] Route: dst=10.0.2.2 direct (same subnet)
+[3/4] Sending ICMP echo...
+[4/4] ARP already cached
+Ping sent to 10.0.2.2
+
+TinyOS> send 10.0.2.2 8989 Hello World!
+[1/4] Target: 10.0.2.2:8989, msg="Hello World!"
+[2/4] Route: dst=10.0.2.2 via gateway 10.0.2.2
+[3/4] Sending UDP...
+[4/4] ARP already cached
+Sent 12 bytes to 10.0.2.2:8989
 ```
 
 ### 在 Windows 上接收 UDP
 
-Windows 没有 netcat，可用 PowerShell：
+先在 Windows 上启动监听，再在 TinyOS 中执行 `send` 命令。
+
+**方法 1：Python（推荐）**
+```python
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.bind(('0.0.0.0', 8989))
+print('Listening on UDP 8989...')
+data, addr = s.recvfrom(1024)
+print(f'Received: {data.decode()} from {addr}')
+s.close()
+```
+
+**方法 2：PowerShell**
 ```powershell
-$udp = New-Object System.Net.Sockets.UdpClient(8888)
+$udp = New-Object System.Net.Sockets.UdpClient(8989)
 $remote = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
 $data = $udp.Receive([ref]$remote)
 [System.Text.Encoding]::UTF8.GetString($data)
 $udp.Close()
 ```
 
-先在 Windows 上启动上述监听脚本，然后在 TinyOS 中执行 `send` 命令即可收到消息。
-
-### 使用 Python 监听（推荐）
-```python
-import socket
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.bind(('0.0.0.0', 8888))
-print('Listening on UDP 8888...')
-data, addr = s.recvfrom(1024)
-print(f'Received: {data.decode()}')
-s.close()
-```
+> 提示：从 TinyOS 发往主机的 UDP 数据包无需 `hostfwd` 端口转发，QEMU user-mode 网络默认可达主机（10.0.2.2）。`hostfwd` 仅用于主机向虚拟机发送数据。

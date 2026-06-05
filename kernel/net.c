@@ -94,7 +94,7 @@ int net_send_arp_request(uint32_t target_ip) {
     arp->proto_len = 4;
     arp->opcode = htons(ARP_OP_REQUEST);
     memcpy(arp->sender_mac, ne2000_get_mac(), 6);
-    arp->sender_ip = my_ip;  /* host byte order */
+    arp->sender_ip = my_ip;
     memset(arp->target_mac, 0, 6);
     arp->target_ip = target_ip;
 
@@ -109,19 +109,37 @@ int net_send_arp_request(uint32_t target_ip) {
 }
 
 static void handle_arp(const uint8_t* data, uint16_t len) {
-    if (len < sizeof(arp_header_t)) return;
+    if (len < sizeof(arp_header_t)) {
+        serial_printf("[ARP] recv: too short (%u bytes)\n", len);
+        return;
+    }
 
     const arp_header_t* arp = (const arp_header_t*)data;
 
-    if (ntohs(arp->hw_type) != 1 || ntohs(arp->proto_type) != 0x0800) return;
+    if (ntohs(arp->hw_type) != 1 || ntohs(arp->proto_type) != 0x0800) {
+        serial_printf("[ARP] recv: unsupported hw=%u proto=0x%04X\n",
+                      ntohs(arp->hw_type), ntohs(arp->proto_type));
+        return;
+    }
     if (arp->hw_len != 6 || arp->proto_len != 4) return;
+
+    uint16_t opcode = ntohs(arp->opcode);
+    serial_printf("[ARP] recv: op=%s sender=%u.%u.%u.%u target=%u.%u.%u.%u "
+                  "sender_mac=%02x:%02x:%02x:%02x:%02x:%02x\n",
+                  (opcode == ARP_OP_REQUEST) ? "REQUEST" :
+                  (opcode == ARP_OP_REPLY) ? "REPLY" : "UNKNOWN",
+                  arp->sender_ip & 0xFF, (arp->sender_ip >> 8) & 0xFF,
+                  (arp->sender_ip >> 16) & 0xFF, (arp->sender_ip >> 24) & 0xFF,
+                  arp->target_ip & 0xFF, (arp->target_ip >> 8) & 0xFF,
+                  (arp->target_ip >> 16) & 0xFF, (arp->target_ip >> 24) & 0xFF,
+                  arp->sender_mac[0], arp->sender_mac[1], arp->sender_mac[2],
+                  arp->sender_mac[3], arp->sender_mac[4], arp->sender_mac[5]);
 
     /* Add sender to ARP table */
     arp_table_add(arp->sender_ip, arp->sender_mac);
 
-    uint16_t opcode = ntohs(arp->opcode);
-
     if (opcode == ARP_OP_REQUEST && arp->target_ip == my_ip) {
+        serial_printf("[ARP] Received request for us, sending reply\n");
         /* Send ARP reply */
         build_eth_header(arp->sender_mac, ETHERTYPE_ARP);
 
@@ -312,19 +330,36 @@ static void handle_ip(const uint8_t* data, uint16_t len) {
 /* ---- Main receive handler ---- */
 
 void net_recv_handler(const uint8_t* frame, uint16_t len) {
-    if (len < sizeof(eth_header_t)) return;
+    if (len < sizeof(eth_header_t)) {
+        serial_printf("[NET] recv: frame too short (%u bytes)\n", len);
+        return;
+    }
 
     const eth_header_t* eth = (const eth_header_t*)frame;
     uint16_t ethertype = ntohs(eth->ethertype);
     const uint8_t* payload = frame + sizeof(eth_header_t);
     uint16_t payload_len = len - sizeof(eth_header_t);
 
+    serial_printf("[NET] recv: len=%u dst=%02x:%02x:%02x:%02x:%02x:%02x "
+                  "src=%02x:%02x:%02x:%02x:%02x:%02x ethertype=0x%04x\n",
+                  len,
+                  eth->dst_mac[0], eth->dst_mac[1], eth->dst_mac[2],
+                  eth->dst_mac[3], eth->dst_mac[4], eth->dst_mac[5],
+                  eth->src_mac[0], eth->src_mac[1], eth->src_mac[2],
+                  eth->src_mac[3], eth->src_mac[4], eth->src_mac[5],
+                  ethertype);
+
     switch (ethertype) {
         case ETHERTYPE_ARP:
+            serial_printf("[NET] recv: -> ARP handler\n");
             handle_arp(payload, payload_len);
             break;
         case ETHERTYPE_IP:
+            serial_printf("[NET] recv: -> IP handler\n");
             handle_ip(payload, payload_len);
+            break;
+        default:
+            serial_printf("[NET] recv: unknown ethertype 0x%04x\n", ethertype);
             break;
     }
 }

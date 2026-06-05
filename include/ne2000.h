@@ -87,4 +87,7 @@ const uint8_t* ne2000_get_mac(void);
 typedef void (*ne2k_recv_callback_t)(const uint8_t* data, uint16_t len);
 void ne2000_set_recv_callback(ne2k_recv_callback_t cb);
 
+/* Poll the receive ring buffer (no IRQ required) */
+void ne2000_poll_recv(void);
+
 #endif /* NE2000_H */
