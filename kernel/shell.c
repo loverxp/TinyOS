@@ -23,6 +23,7 @@
 #include "../include/vbe.h"
 #include "../include/builtin_font.h"
 #include "../include/webserver.h"
+#include "../include/rtc.h"
 
 #define LINE_BUF_SIZE 256
 
@@ -578,6 +579,7 @@ static void shell_handle_command(const char* cmd) {
             printf("  send <ip> <port> <msg> - Send UDP packet\n");
             printf("  webserver  - Start HTTP server (port 80, hostfwd :8088)\n");
             printf("  webserver stop - Stop HTTP server\n");
+            printf("  date       - Show current date/time (CMOS RTC)\n");
     } else if (strcmp(cmd, "clear") == 0) {
         vga_clear_screen(VGA_COLOR_BLACK);
         vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
@@ -808,6 +810,12 @@ static void shell_handle_command(const char* cmd) {
         } else {
             webserver_start();
         }
+    } else if (strcmp(cmd, "date") == 0) {
+        rtc_time_t tm;
+        rtc_read_time(&tm);
+        printf("%04u-%02u-%02u %02u:%02u:%02u\n",
+               tm.year, tm.month, tm.day,
+               tm.hour, tm.minute, tm.second);
     } else {
         printf("Unknown command: %s\n", cmd);
         printf("Type 'help' for available commands.\n");

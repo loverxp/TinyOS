@@ -69,6 +69,7 @@
 | `send <IP> <端口> <消息>` | 发送 UDP 数据包        |
 | `webserver`   | 启动 HTTP 服务器（端口 80，宿主机 :8088 转发） |
 | `webserver stop` | 停止 HTTP 服务器              |
+| `date`        | 显示当前日期/时间（CMOS RTC）   |
 
 ## 功能特性
 
@@ -108,6 +109,7 @@
 - ✅ NE2000 网卡驱动（远程 DMA，接收环形缓冲区，IRQ 处理）
 - ✅ 网络协议栈（ARP / IPv4 / ICMP / UDP / TCP）
 - ✅ HTTP WebServer（端口 80，基于 TCP，响应 HTML 页面）
+- ✅ RTC 实时时钟驱动（CMOS，BCD/二进制模式自动检测）
 
 ## 项目结构
 
@@ -158,7 +160,8 @@ TinyOS/
 │   ├── vbe.c              # Bochs VBE 高分辨率显卡驱动
 │   ├── framebuf.c         # 帧缓冲抽象层（putpixel/fillrect/双缓冲）
 │   ├── mouse.c            # PS/2 鼠标驱动（IRQ12）
-│   └── serial.c           # 串口驱动（COM1 中断收发）
+│   ├── serial.c           # 串口驱动（COM1 中断收发）
+│   └── rtc.c              # CMOS 实时时钟驱动
 ├── lib/
 │   ├── string.c           # 字符串处理
 │   └── stdio.c            # printf/sprintf 格式化输出
@@ -191,6 +194,7 @@ TinyOS/
 │   ├── framebuf.h         # 帧缓冲抽象层
 │   ├── mouse.h            # PS/2 鼠标
 │   ├── serial.h           # 串口驱动
+│   ├── rtc.h              # CMOS 实时时钟
 │   └── window.h           # 窗口管理器
 ├── tools/                 # 交叉编译器
 ├── scripts/               # 构建与运行脚本

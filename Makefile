@@ -36,6 +36,7 @@ C_SRCS    = kernel/kernel.c kernel/shell.c kernel/except.c kernel/gdt.c \
             drivers/vga.c drivers/keyboard.c drivers/timer.c drivers/interrupts.c \
             drivers/ata.c drivers/pci.c drivers/ne2000.c drivers/serial.c \
             drivers/vbe.c drivers/framebuf.c drivers/mouse.c drivers/builtin_font.c \
+            drivers/rtc.c \
             lib/string.c lib/stdio.c
 ASM_SRCS  = boot/boot.asm drivers/interrupts.asm drivers/gdt.asm \
             drivers/io.asm kernel/user.asm kernel/embedded_user.asm \
@@ -66,9 +67,10 @@ user-programs:
 disk:
 	python scripts\mkfat16.py disk.img
 
-# Link
+# Link (write to temp then move to work around path translation issues)
 $(TARGET): $(OBJECTS) | $(BUILD)
-	$(LD) $(LDFLAGS) -o $@ $(OBJECTS)
+	$(LD) $(LDFLAGS) -o tinyos_tmp.bin $(OBJECTS)
+	move /Y tinyos_tmp.bin $(TARGET) >nul 2>&1
 
 # embedded binaries depend on user binaries
 $(BUILD)/embedded_user_asm.o: kernel/embedded_user.asm build/user/gfxsnake.elf | $(BUILD)

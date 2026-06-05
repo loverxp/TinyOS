@@ -98,9 +98,10 @@ static int vsprintf_internal(char* buf, const char* fmt, __builtin_va_list args)
                 itoa_str(i, num_buf, 10);
                 int len = 0;
                 for (const char* p = num_buf; *p; p++) len++;
+                char pad_ch = pad_zero ? '0' : ' ';
                 if (!left_align) {
                     int w = width;
-                    while (len < w) { *str++ = ' '; w--; }
+                    while (len < w) { *str++ = pad_ch; w--; }
                 }
                 char* s = num_buf;
                 while (*s) *str++ = *s++;
@@ -115,9 +116,10 @@ static int vsprintf_internal(char* buf, const char* fmt, __builtin_va_list args)
                 uitoa_str(u, num_buf, 10);
                 int len = 0;
                 for (const char* p = num_buf; *p; p++) len++;
+                char pad_ch = pad_zero ? '0' : ' ';
                 if (!left_align) {
                     int w = width;
-                    while (len < w) { *str++ = ' '; w--; }
+                    while (len < w) { *str++ = pad_ch; w--; }
                 }
                 char* s = num_buf;
                 while (*s) *str++ = *s++;
