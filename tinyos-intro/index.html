@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyOS - 项目介绍</title>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0e1a;
+    --accent: #00d4ff;
+    --accent2: #7c3aed;
+    --accent3: #10b981;
+    --text: #e2e8f0;
+    --dim: #64748b;
+    --card-bg: rgba(255,255,255,0.04);
+    --border: rgba(255,255,255,0.08);
+  }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    overflow: hidden;
+  }
+
+  /* ── Global canvas ── */
+  #stage {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ── Particle background ── */
+  #particles {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  }
+
+  /* ── Grid overlay ── */
+  .grid-overlay {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 60px 60px;
+  }
+
+  /* ── Scenes ── */
+  .scene {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 60px;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* ── Scene 0: Hero ── */
+  .hero-chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 16px;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 32px;
+    background: rgba(0,212,255,0.05);
+  }
+  .hero-chip::before {
+    content: ''; width: 6px; height: 6px;
+    background: var(--accent); border-radius: 50%;
+    animation: pulse-dot 2s infinite;
+  }
+  @keyframes pulse-dot {
+    0%,100% { opacity: 1; } 50% { opacity: 0.3; }
+  }
+
+  .hero-title {
+    font-size: clamp(64px, 10vw, 140px);
+    font-weight: 900;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    text-align: center;
+    background: linear-gradient(135deg, #fff 0%, var(--accent) 60%, var(--accent2) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 24px;
+  }
+
+  .hero-sub {
+    font-size: clamp(18px, 2.5vw, 28px);
+    font-weight: 300;
+    color: var(--dim);
+    text-align: center;
+    max-width: 680px;
+    line-height: 1.6;
+  }
+  .hero-sub span { color: var(--accent); font-weight: 600; }
+
+  .hero-badge-row {
+    display: flex; gap: 16px; margin-top: 48px; flex-wrap: wrap; justify-content: center;
+  }
+  .badge {
+    padding: 8px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    color: var(--dim);
+  }
+  .badge b { color: var(--text); }
+
+  /* ── Scene 1: What ── */
+  .section-label {
+    font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 20px;
+  }
+  .big-statement {
+    font-size: clamp(28px, 4vw, 52px);
+    font-weight: 700;
+    line-height: 1.3;
+    text-align: center;
+    max-width: 900px;
+    margin-bottom: 40px;
+  }
+  .big-statement em {
+    font-style: normal;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .desc-text {
+    font-size: clamp(15px, 1.8vw, 20px);
+    color: var(--dim);
+    text-align: center;
+    max-width: 760px;
+    line-height: 1.8;
+  }
+
+  /* ── Scene 2: Architecture ── */
+  .arch-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    width: 100%;
+    max-width: 1100px;
+  }
+  .arch-layer {
+    border-radius: 14px;
+    padding: 28px 20px;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    display: flex; flex-direction: column; gap: 10px;
+    align-items: center; text-align: center;
+    backdrop-filter: blur(10px);
+  }
+  .arch-layer .icon { font-size: 32px; margin-bottom: 4px; }
+  .arch-layer h3 { font-size: 14px; font-weight: 700; color: #fff; }
+  .arch-layer p { font-size: 12px; color: var(--dim); line-height: 1.5; }
+  .arch-layer.l1 { border-color: rgba(0,212,255,0.3); background: rgba(0,212,255,0.06); }
+  .arch-layer.l2 { border-color: rgba(124,58,237,0.3); background: rgba(124,58,237,0.06); }
+  .arch-layer.l3 { border-color: rgba(16,185,129,0.3); background: rgba(16,185,129,0.06); }
+  .arch-layer.l4 { border-color: rgba(251,146,60,0.3); background: rgba(251,146,60,0.06); }
+  .arch-layer.l5 { border-color: rgba(236,72,153,0.3); background: rgba(236,72,153,0.06); }
+
+  /* ── Scene 3: Modules ── */
+  .modules-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    width: 100%; max-width: 1200px;
+  }
+  .mod-card {
+    border-radius: 14px;
+    padding: 22px 18px;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    backdrop-filter: blur(10px);
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .mod-card .mod-icon {
+    width: 40px; height: 40px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+  .mod-card h3 { font-size: 14px; font-weight: 700; color: #fff; }
+  .mod-card p { font-size: 11px; color: var(--dim); line-height: 1.5; }
+  .mc1 .mod-icon { background: rgba(0,212,255,0.15); }
+  .mc2 .mod-icon { background: rgba(124,58,237,0.15); }
+  .mc3 .mod-icon { background: rgba(16,185,129,0.15); }
+  .mc4 .mod-icon { background: rgba(251,146,60,0.15); }
+  .mc5 .mod-icon { background: rgba(236,72,153,0.15); }
+  .mc6 .mod-icon { background: rgba(56,189,248,0.15); }
+  .mc7 .mod-icon { background: rgba(168,85,247,0.15); }
+  .mc8 .mod-icon { background: rgba(52,211,153,0.15); }
+  .mc9 .mod-icon { background: rgba(244,114,182,0.15); }
+  .mc10 .mod-icon { background: rgba(251,191,36,0.15); }
+  .mc11 .mod-icon { background: rgba(99,102,241,0.15); }
+  .mc12 .mod-icon { background: rgba(34,211,238,0.15); }
+
+  /* ── Scene 4: Boot Sequence ── */
+  .boot-flow {
+    display: flex; align-items: center; gap: 0;
+    flex-wrap: nowrap;
+    max-width: 1200px;
+  }
+  .boot-step {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    flex: 1; min-width: 80px;
+    text-align: center;
+  }
+  .boot-step .step-num {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px;
+    border: 2px solid var(--accent);
+    color: var(--accent);
+    background: rgba(0,212,255,0.08);
+  }
+  .boot-step h4 { font-size: 12px; font-weight: 600; color: #fff; }
+  .boot-step p { font-size: 10px; color: var(--dim); line-height: 1.4; max-width: 90px; }
+  .boot-arrow {
+    color: var(--accent); font-size: 16px; flex-shrink: 0;
+    opacity: 0.5;
+  }
+
+  /* ── Scene 5: Features ── */
+  .feat-list {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    max-width: 1000px;
+    width: 100%;
+  }
+  .feat-item {
+    display: flex; gap: 16px; align-items: flex-start;
+    padding: 24px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+  }
+  .feat-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    flex-shrink: 0; margin-top: 4px;
+  }
+  .feat-item h4 { font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 6px; }
+  .feat-item p { font-size: 12px; color: var(--dim); line-height: 1.6; }
+
+  /* ── Scene 6: Tech Stack ── */
+  .tech-row {
+    display: flex; gap: 24px; flex-wrap: wrap; justify-content: center;
+    max-width: 900px;
+  }
+  .tech-pill {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 28px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    font-size: 15px; font-weight: 600;
+  }
+  .tech-pill .t-icon { font-size: 22px; }
+  .tech-pill small { display: block; font-size: 11px; color: var(--dim); font-weight: 400; }
+
+  /* ── Scene 7: Outro ── */
+  .outro-title {
+    font-size: clamp(36px, 6vw, 80px);
+    font-weight: 900;
+    background: linear-gradient(135deg, var(--accent), var(--accent2), var(--accent3));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 24px;
+    text-align: center;
+  }
+  .outro-url {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: clamp(14px, 2vw, 22px);
+    color: var(--dim);
+    padding: 12px 32px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--card-bg);
+  }
+  .outro-url span { color: var(--accent); }
+
+  /* ── Controls ── */
+  #controls {
+    position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 12px; align-items: center;
+    z-index: 100;
+    padding: 10px 20px;
+    border-radius: 999px;
+    background: rgba(10,14,26,0.85);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(16px);
+  }
+  #controls button {
+    background: none; border: none; color: var(--text);
+    font-size: 18px; cursor: pointer; padding: 4px 8px;
+    border-radius: 6px;
+    transition: background 0.2s;
+  }
+  #controls button:hover { background: rgba(255,255,255,0.1); }
+  #scene-counter {
+    font-size: 13px; color: var(--dim);
+    font-family: 'JetBrains Mono', monospace;
+    min-width: 50px; text-align: center;
+  }
+  #progress-bar {
+    position: fixed; top: 0; left: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    z-index: 100;
+    transition: width 0.5s ease;
+  }
+</style>
+</head>
+<body>
+
+<div id="progress-bar" style="width:0%"></div>
+<canvas id="particles"></canvas>
+<div class="grid-overlay"></div>
+
+<div id="stage">
+
+  <!-- Scene 0: Hero -->
+  <div class="scene" id="s0">
+    <div class="hero-chip">x86 OS Kernel with GUI & Networking</div>
+    <div class="hero-title">TinyOS</div>
+    <div class="hero-sub">
+      一个基于 <span>C / ASM</span> 的 x86 32 位操作系统内核<br>
+      从引导到 <span>GUI 桌面</span>、<span>网络协议栈</span>的完整闭环
+    </div>
+    <div class="hero-badge-row">
+      <div class="badge"><b>Ring 0/3</b> 特权级</div>
+      <div class="badge"><b>GUI</b> 窗口管理器</div>
+      <div class="badge"><b>TCP/IP</b> 网络栈</div>
+      <div class="badge"><b>Scheduler</b> 多任务</div>
+      <div class="badge"><b>QEMU</b> 运行</div>
+      <div class="badge"><b>MIT</b> 开源</div>
+    </div>
+  </div>
+
+  <!-- Scene 1: What -->
+  <div class="scene" id="s1">
+    <div class="section-label">项目定位</div>
+    <div class="big-statement">
+      从教学内核到<em>完整操作系统</em><br>
+      <em>GUI 桌面</em> · <em>网络协议栈</em> · <em>多任务调度</em>
+    </div>
+    <div class="desc-text">
+      涵盖引导、内存管理、中断处理、抢占式调度、用户态切换、
+      文件系统、VBE 高分辨率图形、窗口管理器与 TCP/IP 网络，
+      通过混合语言开发展示底层系统编程的真实世界实践。
+    </div>
+  </div>
+
+  <!-- Scene 2: Architecture -->
+  <div class="scene" id="s2">
+    <div class="section-label">分层架构</div>
+    <div class="big-statement" style="font-size:clamp(22px,3vw,38px);margin-bottom:48px;">
+      引导层 → 内核层 → 驱动层 → 库层 → 用户态
+    </div>
+    <div class="arch-grid">
+      <div class="arch-layer l1">
+        <div class="icon">⚡</div>
+        <h3>引导层</h3>
+        <p>Multiboot 兼容启动<br>加载内核至 1MB</p>
+      </div>
+      <div class="arch-layer l2">
+        <div class="icon">🧠</div>
+        <h3>内核层</h3>
+        <p>调度器 / Shell / WM<br>网络栈 / FAT16 / 加载器</p>
+      </div>
+      <div class="arch-layer l3">
+        <div class="icon">🔌</div>
+        <h3>驱动层</h3>
+        <p>VBE / 帧缓冲 / 鼠标<br>ATA / NE2000 / RTC / 串口</p>
+      </div>
+      <div class="arch-layer l4">
+        <div class="icon">📚</div>
+        <h3>库层</h3>
+        <p>字符串处理<br>printf / sprintf</p>
+      </div>
+      <div class="arch-layer l5">
+        <div class="icon">👤</div>
+        <h3>用户态</h3>
+        <p>Ring 3 程序 / libc<br>ELF 加载执行</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scene 3: Core Modules -->
+  <div class="scene" id="s3">
+    <div class="section-label">核心模块</div>
+    <div class="big-statement" style="font-size:clamp(20px,2.5vw,32px);margin-bottom:36px;">十二大子系统协同工作</div>
+    <div class="modules-grid">
+      <div class="mod-card mc1">
+        <div class="mod-icon">🛡️</div>
+        <h3>GDT / TSS</h3>
+        <p>保护模式段管理，Ring 0/3 特权级隔离，任务状态段内核栈切换</p>
+      </div>
+      <div class="mod-card mc2">
+        <div class="mod-icon">💾</div>
+        <h3>内存管理</h3>
+        <p>PMM 位图页帧分配，MM 块式堆分配器，kmalloc / kfree</p>
+      </div>
+      <div class="mod-card mc3">
+        <div class="mod-icon">📄</div>
+        <h3>分页机制</h3>
+        <p>页目录 / 页表管理，前 8MB Identity Map，动态映射</p>
+      </div>
+      <div class="mod-card mc4">
+        <div class="mod-icon">⚠️</div>
+        <h3>中断 / 异常</h3>
+        <p>IDT + PIC，汇编桩 + C 处理，GPF / Page Fault 捕获</p>
+      </div>
+      <div class="mod-card mc5">
+        <div class="mod-icon">🔄</div>
+        <h3>抢占式调度器</h3>
+        <p>Round-Robin 时间片轮转，IRQ0 驱动上下文切换</p>
+      </div>
+      <div class="mod-card mc6">
+        <div class="mod-icon">🖥️</div>
+        <h3>VBE 图形 + 帧缓冲</h3>
+        <p>800×600×32 高分辨率，双缓冲消除闪屏，字体渲染</p>
+      </div>
+      <div class="mod-card mc7">
+        <div class="mod-icon">🪟</div>
+        <h3>窗口管理器</h3>
+        <p>动态创建/拖拽/关闭，Z-order 层叠，标题栏，GUI 桌面</p>
+      </div>
+      <div class="mod-card mc8">
+        <div class="mod-icon">🌐</div>
+        <h3>网络协议栈</h3>
+        <p>ARP / IPv4 / ICMP / UDP / TCP 完整实现</p>
+      </div>
+      <div class="mod-card mc9">
+        <div class="mod-icon">📡</div>
+        <h3>HTTP WebServer</h3>
+        <p>基于 TCP 端口 80，响应 HTML 页面，宿主机端口转发</p>
+      </div>
+      <div class="mod-card mc10">
+        <div class="mod-icon">💿</div>
+        <h3>FAT16 文件系统</h3>
+        <p>ATA PIO 磁盘驱动，只读 FAT16，目录遍历与文件读取</p>
+      </div>
+      <div class="mod-card mc11">
+        <div class="mod-icon">🖱️</div>
+        <h3>PS/2 鼠标驱动</h3>
+        <p>IRQ12 中断驱动，三字节数据包，事件回调，GUI 指针</p>
+      </div>
+      <div class="mod-card mc12">
+        <div class="mod-icon">📦</div>
+        <h3>ELF 加载器 + libc</h3>
+        <p>用户态 ELF 程序加载，完整 C 标准库支持</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scene 4: Boot Sequence -->
+  <div class="scene" id="s4">
+    <div class="section-label">启动流程</div>
+    <div class="big-statement" style="font-size:clamp(20px,2.5vw,32px);margin-bottom:48px;">从上电到 GUI 桌面的完整旅程</div>
+    <div class="boot-flow">
+      <div class="boot-step"><div class="step-num">1</div><h4>QEMU</h4><p>Multiboot 加载至 0x100000</p></div>
+      <div class="boot-arrow">→</div>
+      <div class="boot-step"><div class="step-num">2</div><h4>GDT/TSS</h4><p>保护模式段与任务状态段</p></div>
+      <div class="boot-arrow">→</div>
+      <div class="boot-step"><div class="step-num">3</div><h4>PMM/MM</h4><p>物理内存与堆初始化</p></div>
+      <div class="boot-arrow">→</div>
+      <div class="boot-step"><div class="step-num">4</div><h4>分页</h4><p>Identity Map 前 8MB</p></div>
+      <div class="boot-arrow">→</div>
+      <div class="boot-step"><div class="step-num">5</div><h4>IDT/PIC</h4><p>中断描述符表与控制器</p></div>
+      <div class="boot-arrow">→</div>
+      <div class="boot-step"><div class="step-num">6</div><h4>VBE/鼠标</h4><p>高分辨率显示与 PS/2</p></div>
+      <div class="boot-arrow">→</div>
+      <div class="boot-step"><div class="step-num">7</div><h4>网络/磁盘</h4><p>NE2000 + ATA + FAT16</p></div>
+      <div class="boot-arrow">→</div>
+      <div class="boot-step"><div class="step-num">8</div><h4>Shell</h4><p>交互式命令界面</p></div>
+      <div class="boot-arrow">→</div>
+      <div class="boot-step"><div class="step-num" style="border-color:var(--accent3);color:var(--accent3);background:rgba(16,185,129,0.1)">✓</div><h4>halt()</h4><p>事件驱动主循环</p></div>
+    </div>
+  </div>
+
+  <!-- Scene 5: Features -->
+  <div class="scene" id="s5">
+    <div class="section-label">特色功能</div>
+    <div class="big-statement" style="font-size:clamp(20px,2.5vw,32px);margin-bottom:40px;">不只是内核，更是完整的操作系统</div>
+    <div class="feat-list">
+      <div class="feat-item">
+        <div class="feat-dot" style="background:var(--accent)"></div>
+        <div><h4>GUI 桌面环境</h4><p>VBE 800×600 高分辨率，窗口管理器支持拖拽/关闭/Z-order，鼠标指针，`gui` 命令一键启动</p></div>
+      </div>
+      <div class="feat-item">
+        <div class="feat-dot" style="background:var(--accent2)"></div>
+        <div><h4>HTTP WebServer</h4><p>内核内置 TCP/IP 协议栈，端口 80 HTTP 服务器，宿主机 :8088 端口转发即可浏览器访问</p></div>
+      </div>
+      <div class="feat-item">
+        <div class="feat-dot" style="background:var(--accent3)"></div>
+        <div><h4>抢占式多任务</h4><p>Round-Robin 调度器，IRQ0 驱动时间片，schedtest 命令测试并发任务</p></div>
+      </div>
+      <div class="feat-item">
+        <div class="feat-dot" style="background:#fb923c"></div>
+        <div><h4>网络协议栈</h4><p>ARP / IPv4 / ICMP / UDP / TCP 全实现，ping / send 命令直接测试</p></div>
+      </div>
+      <div class="feat-item">
+        <div class="feat-dot" style="background:#ec4899"></div>
+        <div><h4>FAT16 文件系统</h4><p>ATA PIO 驱动 + FAT16 只读解析，ls / cat / diskinfo 命令操作磁盘</p></div>
+      </div>
+      <div class="feat-item">
+        <div class="feat-dot" style="background:#38bdf8"></div>
+        <div><h4>VGA 贪吃蛇</h4><p>Mode 13h 像素渲染 + Ring 3 用户态游戏，系统调用读取输入，完整游戏循环</p></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scene 6: Tech Stack -->
+  <div class="scene" id="s6">
+    <div class="section-label">技术栈</div>
+    <div class="big-statement" style="font-size:clamp(20px,2.5vw,32px);margin-bottom:48px;">简洁而强大的工具链</div>
+    <div class="tech-row">
+      <div class="tech-pill"><span class="t-icon">🔧</span><div>NASM<small>x86 汇编器</small></div></div>
+      <div class="tech-pill"><span class="t-icon">⚙️</span><div>i686-elf-gcc<small>交叉编译器</small></div></div>
+      <div class="tech-pill"><span class="t-icon">🔗</span><div>i686-elf-ld<small>链接器</small></div></div>
+      <div class="tech-pill"><span class="t-icon">🖥️</span><div>QEMU<small>x86 模拟器</small></div></div>
+      <div class="tech-pill"><span class="t-icon">📋</span><div>Makefile<small>增量构建</small></div></div>
+      <div class="tech-pill"><span class="t-icon">🐍</span><div>Python<small>镜像工具</small></div></div>
+    </div>
+  </div>
+
+  <!-- Scene 7: Outro -->
+  <div class="scene" id="s7">
+    <div class="outro-title">Start Exploring</div>
+    <div class="outro-url">github.com/<span>loverxp</span>/TinyOS</div>
+    <div class="desc-text" style="margin-top:40px;">
+      从引导到 GUI 桌面与网络世界的完整闭环<br>
+      编译、运行、学习 —— 就这么简单
+    </div>
+  </div>
+
+</div>
+
+<!-- Controls -->
+<div id="controls">
+  <button id="btn-prev" title="上一页">◀</button>
+  <button id="btn-play" title="播放/暂停">⏸</button>
+  <span id="scene-counter">1 / 8</span>
+  <button id="btn-next" title="下一页">▶</button>
+</div>
+
+<script>
+// ── Particles ──
+const canvas = document.getElementById('particles');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = innerWidth; H = canvas.height = innerHeight; }
+resize(); window.addEventListener('resize', resize);
+
+const dots = Array.from({length: 80}, () => ({
+  x: Math.random() * innerWidth,
+  y: Math.random() * innerHeight,
+  r: Math.random() * 1.5 + 0.5,
+  dx: (Math.random() - 0.5) * 0.3,
+  dy: (Math.random() - 0.5) * 0.3,
+  o: Math.random() * 0.4 + 0.1
+}));
+
+function drawParticles() {
+  ctx.clearRect(0, 0, W, H);
+  dots.forEach(d => {
+    d.x += d.dx; d.y += d.dy;
+    if (d.x < 0) d.x = W; if (d.x > W) d.x = 0;
+    if (d.y < 0) d.y = H; if (d.y > H) d.y = 0;
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(0,212,255,${d.o})`;
+    ctx.fill();
+  });
+  requestAnimationFrame(drawParticles);
+}
+drawParticles();
+
+// ── Scene management ──
+const scenes = document.querySelectorAll('.scene');
+const total = scenes.length;
+let current = 0;
+let playing = true;
+let timer = null;
+const SCENE_DURATION = 7000;
+
+const counter = document.getElementById('scene-counter');
+const progressBar = document.getElementById('progress-bar');
+const btnPlay = document.getElementById('btn-play');
+
+function showScene(idx, direction = 1) {
+  const prev = scenes[current];
+  const next = scenes[idx];
+
+  // Fade out previous
+  gsap.to(prev, { opacity: 0, duration: 0.6, ease: 'power2.inOut',
+    onComplete: () => { prev.style.pointerEvents = 'none'; }
+  });
+
+  // Fade in next
+  next.style.pointerEvents = 'auto';
+  gsap.fromTo(next, { opacity: 0, y: direction * 40 }, { opacity: 1, y: 0, duration: 0.8, ease: 'power2.out', delay: 0.3 });
+
+  // Animate children with stagger
+  const children = next.querySelectorAll('.arch-layer, .mod-card, .boot-step, .feat-item, .tech-pill, .boot-arrow');
+  if (children.length) {
+    gsap.fromTo(children,
+      { opacity: 0, y: 30, scale: 0.95 },
+      { opacity: 1, y: 0, scale: 1, duration: 0.5, stagger: 0.07, ease: 'back.out(1.2)', delay: 0.5 }
+    );
+  }
+
+  current = idx;
+  counter.textContent = `${idx + 1} / ${total}`;
+  progressBar.style.width = `${((idx + 1) / total) * 100}%`;
+}
+
+function nextScene() {
+  if (current < total - 1) showScene(current + 1, 1);
+  else { playing = false; btnPlay.textContent = '▶'; clearInterval(timer); }
+}
+function prevScene() {
+  if (current > 0) showScene(current - 1, -1);
+}
+
+function startAutoPlay() {
+  clearInterval(timer);
+  timer = setInterval(nextScene, SCENE_DURATION);
+}
+
+// Init first scene
+scenes[0].style.opacity = '1';
+scenes[0].style.pointerEvents = 'auto';
+gsap.fromTo('#s0 .hero-chip', { opacity: 0, y: -20 }, { opacity: 1, y: 0, duration: 0.8, delay: 0.2 });
+gsap.fromTo('#s0 .hero-title', { opacity: 0, scale: 0.8 }, { opacity: 1, scale: 1, duration: 1, ease: 'back.out(1.5)', delay: 0.5 });
+gsap.fromTo('#s0 .hero-sub', { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.8, delay: 0.9 });
+gsap.fromTo('#s0 .badge', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, stagger: 0.1, delay: 1.2 });
+
+startAutoPlay();
+
+// Controls
+document.getElementById('btn-next').addEventListener('click', () => { nextScene(); if (playing) startAutoPlay(); });
+document.getElementById('btn-prev').addEventListener('click', () => { prevScene(); if (playing) startAutoPlay(); });
+btnPlay.addEventListener('click', () => {
+  playing = !playing;
+  btnPlay.textContent = playing ? '⏸' : '▶';
+  if (playing) startAutoPlay(); else clearInterval(timer);
+});
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); nextScene(); if (playing) startAutoPlay(); }
+  if (e.key === 'ArrowLeft') { prevScene(); if (playing) startAutoPlay(); }
+  if (e.key === 'p') { btnPlay.click(); }
+});
+</script>
+</body>
+</html>
