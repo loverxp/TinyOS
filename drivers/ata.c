@@ -28,6 +28,18 @@ static int ata_wait_drq(void) {
     return -1;
 }
 
+/* Wait for drive to finish writing (BSY clear). Returns 0 on success, -1 on timeout. */
+static int ata_wait_write(void) {
+    for (int i = 0; i < 100000; i++) {
+        uint8_t status = inb(ATA_PRIMARY_IO + ATA_REG_STATUS);
+        if (status & ATA_SR_ERR) return -1;
+        if (status & ATA_SR_DF)  return -1;
+        if (!(status & ATA_SR_BSY)) return 0;
+        io_wait();
+    }
+    return -1;
+}
+
 int ata_init(void) {
     /* Select master drive */
     outb(ATA_PRIMARY_IO + ATA_REG_DRIVE, ATA_DRIVE_MASTER);
@@ -125,6 +137,40 @@ int ata_read_sectors(uint32_t lba, uint8_t count, void* buffer) {
             buf[s * 256 + i] = inw(ATA_PRIMARY_IO + ATA_REG_DATA);
         }
     }
+
+    return 0;
+}
+
+int ata_write_sectors(uint32_t lba, uint8_t count, const void* buffer) {
+    if (!disk_detected) return -1;
+    if (count == 0) return 0;
+
+    const uint16_t* buf = (const uint16_t*)buffer;
+
+    if (ata_wait_ready() < 0) return -1;
+
+    outb(ATA_PRIMARY_IO + ATA_REG_SECCOUNT, count);
+    outb(ATA_PRIMARY_IO + ATA_REG_LBA_LO, (uint8_t)(lba & 0xFF));
+    outb(ATA_PRIMARY_IO + ATA_REG_LBA_MID, (uint8_t)((lba >> 8) & 0xFF));
+    outb(ATA_PRIMARY_IO + ATA_REG_LBA_HI, (uint8_t)((lba >> 16) & 0xFF));
+    outb(ATA_PRIMARY_IO + ATA_REG_DRIVE,
+         ATA_DRIVE_MASTER | ((lba >> 24) & 0x0F));
+    outb(ATA_PRIMARY_IO + ATA_REG_COMMAND, ATA_CMD_WRITE);
+
+    for (uint8_t s = 0; s < count; s++) {
+        if (ata_wait_drq() < 0) {
+            serial_printf("[ATA] Write error at LBA %u, sector %u\n", lba, s);
+            return -1;
+        }
+        for (int i = 0; i < 256; i++) {
+            outw(ATA_PRIMARY_IO + ATA_REG_DATA, buf[s * 256 + i]);
+        }
+        if (ata_wait_write() < 0) return -1;
+    }
+
+    /* Flush cache */
+    outb(ATA_PRIMARY_IO + ATA_REG_COMMAND, 0xE7);
+    ata_wait_ready();
 
     return 0;
 }

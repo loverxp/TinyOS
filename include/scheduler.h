@@ -21,6 +21,7 @@ typedef struct task {
     uint32_t esp;
     uint32_t stack_base;
     uint32_t ticks_used;
+    uint32_t sleep_deadline;  /* timer tick at which to wake (0 = not sleeping) */
     struct task* next;
 } task_t;
 
@@ -33,5 +34,7 @@ task_t* task_create(const char* name, task_entry_t entry);
 task_t* scheduler_pick_next(void);
 uint32_t prepare_switch(void);
 void task_exit(void);
+void task_yield(void);          /* Voluntarily give up CPU */
+void task_sleep(uint32_t ms);   /* Sleep for N milliseconds */
 
 #endif // SCHEDULER_H

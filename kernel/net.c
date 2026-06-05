@@ -645,6 +645,9 @@ void net_init(uint32_t ip_addr, uint32_t gateway, uint32_t subnet_mask) {
 
     /* Pre-populate ARP with gateway (QEMU user-mode networking) */
     /* The gateway MAC will be learned via ARP on first packet */
+
+    /* Initialize socket layer */
+    net_socket_init();
 }
 
 void net_set_udp_callback(udp_recv_callback_t cb) {
@@ -675,4 +678,369 @@ const net_stats_t* net_get_stats(void) {
 
 void net_stats_reset(void) {
     memset(&stats, 0, sizeof(stats));
+}
+
+/* ---- DHCP Client ---- */
+
+#define DHCP_MAGIC_COOKIE  0x63825363  /* in network byte order */
+
+/* Send a raw UDP broadcast (src_ip may be 0 for DHCP Discover) */
+static int dhcp_send_raw(uint32_t src_ip, uint16_t src_port,
+                          uint16_t dst_port,
+                          const void* data, uint16_t len) {
+    build_eth_header(BROADCAST_MAC, ETHERTYPE_IP);
+
+    uint8_t* udp_start = tx_frame + sizeof(eth_header_t) + 20;
+    udp_header_t* udp = (udp_header_t*)udp_start;
+    udp->src_port = htons(src_port);
+    udp->dst_port = htons(dst_port);
+    udp->length = htons(sizeof(udp_header_t) + len);
+    udp->checksum = 0;
+
+    memcpy(udp_start + sizeof(udp_header_t), data, len);
+
+    uint16_t payload_len = sizeof(udp_header_t) + len;
+
+    /* Build IP header manually (src_ip might be 0) */
+    ip_header_t* ip = (ip_header_t*)(tx_frame + sizeof(eth_header_t));
+    ip->version_ihl = 0x45;
+    ip->tos = 0;
+    ip->total_length = htons(20 + payload_len);
+    ip->identification = htons(ip_id_counter++);
+    ip->flags_frag = htons(0x4000);
+    ip->ttl = 64;
+    ip->protocol = IP_PROTO_UDP;
+    ip->src_ip = src_ip;
+    ip->dst_ip = 0xFFFFFFFF;  /* broadcast */
+    ip->checksum = 0;
+    ip->checksum = ip_checksum(ip, 20);
+
+    uint16_t frame_len = sizeof(eth_header_t) + 20 + payload_len;
+    return ne2000_send(tx_frame, frame_len);
+}
+
+/* DHCP message types */
+#define DHCP_DISCOVER 1
+#define DHCP_OFFER    2
+#define DHCP_REQUEST  3
+#define DHCP_ACK      5
+
+/* Build minimal DHCP packet */
+static uint16_t build_dhcp_packet(uint8_t* buf, uint8_t msg_type,
+                                   uint32_t xid, uint32_t requested_ip,
+                                   uint32_t server_ip) {
+    memset(buf, 0, 300);
+    buf[0] = 1;         /* op: boot request */
+    buf[1] = 1;         /* htype: ethernet */
+    buf[2] = 6;         /* hlen: 6 bytes MAC */
+    buf[3] = 0;         /* hops */
+    /* xid */
+    buf[4] = (xid >> 24) & 0xFF;
+    buf[5] = (xid >> 16) & 0xFF;
+    buf[6] = (xid >> 8)  & 0xFF;
+    buf[7] = xid & 0xFF;
+    /* secs, flags (broadcast) */
+    buf[10] = 0x80;     /* flags high: broadcast */
+    /* chaddr (offset 28) */
+    memcpy(buf + 28, ne2000_get_mac(), 6);
+    /* Magic cookie (offset 236) */
+    buf[236] = 0x63;
+    buf[237] = 0x82;
+    buf[238] = 0x53;
+    buf[239] = 0x63;
+    /* Option 53: DHCP message type */
+    uint16_t pos = 240;
+    buf[pos++] = 53;    /* option code */
+    buf[pos++] = 1;     /* length */
+    buf[pos++] = msg_type;
+
+    if (msg_type == DHCP_REQUEST) {
+        /* Option 50: Requested IP */
+        if (requested_ip) {
+            buf[pos++] = 50;
+            buf[pos++] = 4;
+            buf[pos++] = requested_ip & 0xFF;
+            buf[pos++] = (requested_ip >> 8) & 0xFF;
+            buf[pos++] = (requested_ip >> 16) & 0xFF;
+            buf[pos++] = (requested_ip >> 24) & 0xFF;
+        }
+        /* Option 54: Server Identifier */
+        if (server_ip) {
+            buf[pos++] = 54;
+            buf[pos++] = 4;
+            buf[pos++] = server_ip & 0xFF;
+            buf[pos++] = (server_ip >> 8) & 0xFF;
+            buf[pos++] = (server_ip >> 16) & 0xFF;
+            buf[pos++] = (server_ip >> 24) & 0xFF;
+        }
+    }
+
+    /* Option 61: Client Identifier (MAC) */
+    buf[pos++] = 61;
+    buf[pos++] = 7;
+    buf[pos++] = 1;  /* type: ethernet */
+    memcpy(buf + pos, ne2000_get_mac(), 6);
+    pos += 6;
+
+    /* Option 55: Parameter Request List */
+    buf[pos++] = 55;
+    buf[pos++] = 3;
+    buf[pos++] = 1;   /* subnet mask */
+    buf[pos++] = 3;   /* router (gateway) */
+    buf[pos++] = 51;  /* lease time */
+
+    /* End option */
+    buf[pos++] = 255;
+
+    return pos;
+}
+
+/* Parse DHCP options from a reply */
+static int parse_dhcp_options(const uint8_t* buf, uint16_t len,
+                               uint32_t* out_ip, uint32_t* out_mask,
+                               uint32_t* out_gw, uint32_t* out_server,
+                               uint8_t* out_msg_type) {
+    /* Skip to options (after magic cookie at offset 236) */
+    uint16_t pos = 240;
+    *out_msg_type = 0;
+    (void)out_ip;  /* offered IP is read from yiaddr separately */
+
+    while (pos < len) {
+        uint8_t opt = buf[pos++];
+        if (opt == 255) break;   /* End */
+        if (opt == 0) continue;  /* Pad */
+        if (pos >= len) break;
+        uint8_t olen = buf[pos++];
+        if (pos + olen > len) break;
+
+        if (opt == 53 && olen == 1) {
+            *out_msg_type = buf[pos];
+        } else if (opt == 1 && olen == 4) {
+            *out_mask = buf[pos] | (buf[pos+1] << 8) |
+                        (buf[pos+2] << 16) | (buf[pos+3] << 24);
+        } else if (opt == 3 && olen == 4) {
+            *out_gw = buf[pos] | (buf[pos+1] << 8) |
+                      (buf[pos+2] << 16) | (buf[pos+3] << 24);
+        } else if (opt == 54 && olen == 4) {
+            *out_server = buf[pos] | (buf[pos+1] << 8) |
+                          (buf[pos+2] << 16) | (buf[pos+3] << 24);
+        }
+        pos += olen;
+    }
+    return (*out_msg_type != 0) ? 0 : -1;
+}
+
+/* State for DHCP transaction */
+static uint32_t dhcp_xid = 0;
+static uint32_t dhcp_offered_ip = 0;
+static uint32_t dhcp_server_ip = 0;
+static uint8_t  dhcp_state = 0;  /* 0=idle, 1=sent discover, 2=got offer */
+
+/* DHCP recv handler (called from handle_udp on port 68) */
+static void dhcp_recv_handler(uint32_t src_ip, uint16_t src_port,
+                               uint16_t dst_port,
+                               const uint8_t* data, uint16_t len) {
+    (void)src_ip; (void)src_port; (void)dst_port;
+    if (len < 240) return;
+
+    /* Verify xid */
+    uint32_t xid = ((uint32_t)data[4] << 24) | ((uint32_t)data[5] << 16) |
+                   ((uint32_t)data[6] << 8) | data[7];
+    if (xid != dhcp_xid) return;
+
+    /* Verify magic cookie */
+    if (data[236] != 0x63 || data[237] != 0x82 ||
+        data[238] != 0x53 || data[239] != 0x63) return;
+
+    /* yiaddr = offered IP (offset 16) */
+    uint32_t offered = data[16] | (data[17] << 8) |
+                       (data[18] << 16) | (data[19] << 24);
+
+    uint32_t mask = 0, gw = 0, server = 0;
+    uint8_t msg_type = 0;
+    parse_dhcp_options(data, len, &offered, &mask, &gw, &server, &msg_type);
+
+    if (msg_type == DHCP_OFFER && dhcp_state == 1) {
+        dhcp_offered_ip = offered;
+        dhcp_server_ip = server;
+        dhcp_state = 2;
+        serial_printf("[DHCP] Offer: IP=%u.%u.%u.%u server=%u.%u.%u.%u\n",
+                      offered & 0xFF, (offered >> 8) & 0xFF,
+                      (offered >> 16) & 0xFF, (offered >> 24) & 0xFF,
+                      server & 0xFF, (server >> 8) & 0xFF,
+                      (server >> 16) & 0xFF, (server >> 24) & 0xFF);
+    } else if (msg_type == DHCP_ACK && dhcp_state == 3) {
+        my_ip = offered;
+        my_mask = mask;
+        my_gateway = gw;
+        dhcp_state = 4;  /* done */
+        serial_printf("[DHCP] ACK: IP=%u.%u.%u.%u mask=%u.%u.%u.%u gw=%u.%u.%u.%u\n",
+                      offered & 0xFF, (offered >> 8) & 0xFF,
+                      (offered >> 16) & 0xFF, (offered >> 24) & 0xFF,
+                      mask & 0xFF, (mask >> 8) & 0xFF,
+                      (mask >> 16) & 0xFF, (mask >> 24) & 0xFF,
+                      gw & 0xFF, (gw >> 8) & 0xFF,
+                      (gw >> 16) & 0xFF, (gw >> 24) & 0xFF);
+    }
+}
+
+int net_dhcp_discover(void) {
+    dhcp_xid = 0xDEADBEEF;  /* simple fixed xid */
+    dhcp_state = 1;
+    dhcp_offered_ip = 0;
+    dhcp_server_ip = 0;
+
+    /* Install DHCP recv handler */
+    udp_recv_callback_t old_cb = udp_callback;
+    udp_callback = dhcp_recv_handler;
+
+    uint8_t pkt[300];
+    uint16_t pkt_len = build_dhcp_packet(pkt, DHCP_DISCOVER, dhcp_xid, 0, 0);
+
+    serial_printf("[DHCP] Sending Discover (%u bytes)\n", pkt_len);
+    dhcp_send_raw(0, 68, 67, pkt, pkt_len);
+
+    /* Wait for offer (poll) */
+    for (int i = 0; i < 100 && dhcp_state < 2; i++) {
+        ne2000_poll_recv();
+    }
+
+    if (dhcp_state < 2) {
+        serial_printf("[DHCP] No offer received\n");
+        udp_callback = old_cb;
+        return -1;
+    }
+
+    /* Send Request */
+    dhcp_state = 3;
+    pkt_len = build_dhcp_packet(pkt, DHCP_REQUEST, dhcp_xid,
+                                 dhcp_offered_ip, dhcp_server_ip);
+    serial_printf("[DHCP] Sending Request for %u.%u.%u.%u\n",
+                  dhcp_offered_ip & 0xFF, (dhcp_offered_ip >> 8) & 0xFF,
+                  (dhcp_offered_ip >> 16) & 0xFF, (dhcp_offered_ip >> 24) & 0xFF);
+    dhcp_send_raw(0, 68, 67, pkt, pkt_len);
+
+    /* Wait for ACK */
+    for (int i = 0; i < 100 && dhcp_state < 4; i++) {
+        ne2000_poll_recv();
+    }
+
+    udp_callback = old_cb;
+    return (dhcp_state == 4) ? 0 : -1;
+}
+
+/* ---- Socket Abstraction Layer ---- */
+
+static socket_t sockets[MAX_SOCKETS];
+
+/* Route incoming UDP to sockets */
+static void socket_udp_handler(uint32_t src_ip, uint16_t src_port,
+                                uint16_t dst_port,
+                                const uint8_t* data, uint16_t len) {
+    for (int i = 0; i < MAX_SOCKETS; i++) {
+        if (sockets[i].active && sockets[i].type == SOCK_DGRAM &&
+            sockets[i].local_port == dst_port) {
+            /* Copy into ring buffer */
+            socket_t* s = &sockets[i];
+            uint16_t avail = sizeof(s->rx_buf) - s->rx_count;
+            uint16_t to_copy = len < avail ? len : avail;
+            for (uint16_t j = 0; j < to_copy; j++) {
+                s->rx_buf[s->rx_head] = data[j];
+                s->rx_head = (s->rx_head + 1) % sizeof(s->rx_buf);
+            }
+            s->rx_count += to_copy;
+            /* Store source info */
+            s->remote_ip = src_ip;
+            s->remote_port = src_port;
+            break;
+        }
+    }
+}
+
+int sock_create(int type) {
+    for (int i = 0; i < MAX_SOCKETS; i++) {
+        if (!sockets[i].active) {
+            memset(&sockets[i], 0, sizeof(socket_t));
+            sockets[i].type = type;
+            sockets[i].active = 1;
+            return i;
+        }
+    }
+    return -1;
+}
+
+int sock_bind(int fd, uint16_t port) {
+    if (fd < 0 || fd >= MAX_SOCKETS || !sockets[fd].active) return -1;
+    sockets[fd].local_port = port;
+    return 0;
+}
+
+int sock_connect(int fd, uint32_t ip, uint16_t port) {
+    if (fd < 0 || fd >= MAX_SOCKETS || !sockets[fd].active) return -1;
+    sockets[fd].remote_ip = ip;
+    sockets[fd].remote_port = port;
+    return 0;
+}
+
+int sock_send(int fd, const void* data, uint16_t len) {
+    if (fd < 0 || fd >= MAX_SOCKETS || !sockets[fd].active) return -1;
+    socket_t* s = &sockets[fd];
+    if (s->type == SOCK_DGRAM) {
+        return net_send_udp(s->remote_ip, s->remote_port, s->local_port, data, len);
+    } else {
+        return net_tcp_send(s->remote_ip, s->remote_port, data, len, TCP_PSH | TCP_ACK);
+    }
+}
+
+int sock_recv(int fd, void* buf, uint16_t max_len, uint32_t timeout_ms) {
+    if (fd < 0 || fd >= MAX_SOCKETS || !sockets[fd].active) return -1;
+    socket_t* s = &sockets[fd];
+
+    /* Wait for data with timeout */
+    extern uint32_t timer_get_ticks(void);
+    uint32_t deadline = timer_get_ticks() + (timeout_ms + 19) / 20;
+    while (s->rx_count == 0) {
+        if (timeout_ms > 0 && timer_get_ticks() >= deadline) return 0;
+        ne2000_poll_recv();
+        extern void enable_interrupts(void);
+        asm volatile("hlt");
+    }
+
+    uint16_t to_read = s->rx_count < max_len ? s->rx_count : max_len;
+    uint8_t* dst = (uint8_t*)buf;
+    for (uint16_t i = 0; i < to_read; i++) {
+        dst[i] = s->rx_buf[s->rx_tail];
+        s->rx_tail = (s->rx_tail + 1) % sizeof(s->rx_buf);
+    }
+    s->rx_count -= to_read;
+    return to_read;
+}
+
+int sock_listen(int fd) {
+    if (fd < 0 || fd >= MAX_SOCKETS || !sockets[fd].active) return -1;
+    if (sockets[fd].type == SOCK_STREAM) {
+        net_tcp_listen(sockets[fd].local_port);
+    }
+    return 0;
+}
+
+int sock_accept(int fd, uint32_t* out_ip, uint16_t* out_port) {
+    (void)fd; (void)out_ip; (void)out_port;
+    /* TCP accept not yet implemented (would need connection queue) */
+    return -1;
+}
+
+void sock_close(int fd) {
+    if (fd < 0 || fd >= MAX_SOCKETS || !sockets[fd].active) return;
+    if (sockets[fd].type == SOCK_STREAM) {
+        net_tcp_close(sockets[fd].remote_ip, sockets[fd].remote_port);
+    }
+    sockets[fd].active = 0;
+}
+
+/* Install socket UDP handler (call from net_init or shell) */
+void net_socket_init(void) {
+    memset(sockets, 0, sizeof(sockets));
+    net_set_udp_callback(socket_udp_handler);
+    serial_printf("[NET] Socket layer initialized (%d sockets)\n", MAX_SOCKETS);
 }

@@ -61,4 +61,8 @@ uint32_t fat16_read(const fat16_entry_t* entry, uint32_t offset,
 int fat16_list(void);
 const fat16_bpb_t* fat16_get_bpb(void);
 
+/* Write operations */
+int fat16_write(const char* name, const void* data, uint32_t size);
+int fat16_delete(const char* name);
+
 #endif /* FAT16_H */

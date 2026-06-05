@@ -4,6 +4,7 @@
 #include "../include/stdio.h"
 #include "../include/io.h"
 #include "../include/gdt.h"
+#include "../include/timer.h"
 
 static task_t tasks[MAX_TASKS];
 static task_entry_t task_entries[MAX_TASKS];
@@ -147,6 +148,19 @@ uint32_t prepare_switch(void) {
         }
     }
 
+    /* Wake sleeping tasks whose deadline has passed */
+    uint32_t now = timer_get_ticks();
+    for (int i = 1; i < MAX_TASKS; i++) {
+        if (tasks[i].state == TASK_BLOCKED &&
+            tasks[i].sleep_deadline != 0 &&
+            now >= tasks[i].sleep_deadline) {
+            serial_printf("[sched] Waking '%s' (pid=%u)\n",
+                          tasks[i].name, tasks[i].pid);
+            tasks[i].state = TASK_READY;
+            tasks[i].sleep_deadline = 0;
+        }
+    }
+
     task_t* next = scheduler_pick_next();
     if (!next || next == current_task) {
         return 0;
@@ -192,4 +206,28 @@ void task_exit(void) {
     need_reschedule = 1;
     enable_interrupts();
     while (1) { halt(); }
+}
+
+void task_yield(void) {
+    need_reschedule = 1;
+}
+
+void task_sleep(uint32_t ms) {
+    if (ms == 0) {
+        task_yield();
+        return;
+    }
+    /* Timer runs at 50 Hz (1 tick = 20ms) */
+    uint32_t ticks = (ms + 19) / 20;  /* round up */
+    disable_interrupts();
+    current_task->sleep_deadline = timer_get_ticks() + ticks;
+    current_task->state = TASK_BLOCKED;
+    serial_printf("[sched] '%s' sleeping for %u ticks\n",
+                  current_task->name, ticks);
+    need_reschedule = 1;
+    enable_interrupts();
+    /* Halt until next interrupt wakes us */
+    while (current_task->state == TASK_BLOCKED) {
+        halt();
+    }
 }

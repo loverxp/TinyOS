@@ -44,6 +44,7 @@
 /* API */
 int ata_init(void);
 int ata_read_sectors(uint32_t lba, uint8_t count, void* buffer);
+int ata_write_sectors(uint32_t lba, uint8_t count, const void* buffer);
 int ata_identify(uint16_t* identify_buf);
 int ata_disk_present(void);
 

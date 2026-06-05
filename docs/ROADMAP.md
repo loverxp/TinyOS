@@ -34,6 +34,11 @@
 - **调试框架**（`kprintf` 四级日志，内核异常栈回溯 `kernel_backtrace`）
 - **网络命令**（`arp` 显示/清空缓存，`netstat` 收发统计，`recv <port>` UDP 监听）
 - **Shell 输出优化**（ping/send 移除 `[1/4]` 调试噪声，仅显示关键状态）
+- **yield/sleep 系统调用**（`task_yield()`/`task_sleep(ms)`，syscall 8/9，协作式多任务基础）
+- **FAT16 写支持**（`ata_write_sectors`，文件创建/覆写/删除，FAT 链分配/释放，`write`/`rm` 命令）
+- **DHCP 客户端**（Discover/Offer/Request/ACK 四步协商，`dhcp` 命令，动态获取 IP/网关/掩码）
+- **TCP 监听命令**（`tcp-recv <port>` 10秒监听，显示接收数据）
+- **Socket 抽象层**（`sock_create`/`bind`/`connect`/`send`/`recv`/`listen`/`close`，UDP+TCP 统一接口，环形接收缓冲区）
 
 ---
 
@@ -166,10 +171,9 @@ struct page_directory_entry {
 - [ ] **待完善**
   - `task_exit()` 直接构造帧并调用 do_switch（跳过最后一次 IRQ 浪费）
 
-- [ ] **系统调用**
-  - `fork()` - 创建进程
-  - `yield()` - 主动让出 CPU
-  - `sleep()` - 睡眠等待
+- [x] **yield/sleep 系统调用** ✅ 已实现
+  - `yield()` - 主动让出 CPU (syscall 8)
+  - `sleep(ms)` - 睡眠等待 (syscall 9)，设置 `sleep_deadline`，调度器在 `prepare_switch()` 中自动唤醒
 
 ### 2.2 进程间通信 (IPC)
 **目标**：进程间数据交换
@@ -182,7 +186,7 @@ struct page_directory_entry {
 
 ## 第三阶段：文件系统 (v0.6 - v0.7) ✅ 部分完成
 
-### 3.1 FAT16 文件系统（已实现，只读）
+### 3.1 FAT16 文件系统（已实现，读写）
 
 - [x] **ATA PIO 驱动** (`drivers/ata.c`)
   - 主 IDE 通道 (0x1F0)，28-bit LBA 寻址
@@ -200,7 +204,7 @@ struct page_directory_entry {
   - 生成 16MB FAT16 镜像（4 sectors/cluster, 8120 clusters）
   - 内含示例文件：readme.txt, hello.c, config.txt, test.txt
 
-- [ ] **写支持**（FAT 表更新、文件创建/删除）
+- [x] **写支持**（FAT 表更新、文件创建/覆写/删除，`write`/`rm` 命令）
 - [ ] **子目录支持**
 
 ### 3.2 块设备驱动
@@ -256,7 +260,7 @@ struct page_directory_entry {
 **目标**：命令行解释器
 
 - [x] 命令解析
-- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `ls`, `cat`, `diskinfo`, `pci`, `net`, `ping`, `send`, `recv`, `arp`, `netstat`, `rand`
+- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `ls`, `cat`, `diskinfo`, `pci`, `net`, `ping`, `send`, `recv`, `arp`, `netstat`, `rand`, `write`, `rm`, `dhcp`, `tcp-recv`
 - [ ] 程序执行：`fork` + `exec`
 - [ ] 管道支持：`cmd1 | cmd2`
 
@@ -330,16 +334,17 @@ struct page_directory_entry {
 - [ ] **ARP 缓存管理** — 添加 `arp` 命令显示/清空 ARP 缓存表 ✅ 已实现
 - [ ] **网络统计信息** — 添加 `netstat` 命令显示收发统计（发送/接收包数、错误数） ✅ 已实现
 - [ ] **Shell 命令输出优化** — 移除 ping/send 的 `[1/4]` 调试输出，仅在出错时显示诊断信息 ✅ 已实现
-- [ ] **DHCP 客户端** — 自动获取 IP/网关/掩码，替代硬编码 10.0.2.15
+- [x] **DHCP 客户端** — 自动获取 IP/网关/掩码，替代硬编码 10.0.2.15 ✅ 已实现（`dhcp` 命令）
 - [ ] **DNS 解析** — 支持域名到 IP 的解析（查询 10.0.2.3）
 - [x] **TCP 协议栈**
   - 三次握手（SYN → SYN-ACK → ACK），连接状态机
   - 序列号/确认号管理 + 校验和（复用 IP 校验和函数）
   - 四次挥手（FIN 处理）
   - 简易连接表（支持 4 个并发连接）
-- [ ] **Socket 抽象层**
-  - `tcp_listen(port)` / `tcp_accept()` / `tcp_recv()` / `tcp_send()` / `tcp_close()`
-  - 阻塞等待 + 与调度器协作（recv 阻塞时让出 CPU）
+- [x] **Socket 抽象层** ✅ 已实现
+  - `sock_create()` / `sock_bind()` / `sock_connect()` / `sock_send()` / `sock_recv()` / `sock_listen()` / `sock_close()`
+  - 环形接收缓冲区（1024 bytes），超时接收（`sock_recv` with timeout_ms）
+  - UDP 自动路由到对应 socket（按 local_port 匹配）
 - [ ] **HTTP 客户端** — 基于 TCP 实现 GET 请求，获取网页内容
 - [x] **Web 服务器** — 基于 TCP + HTTP 提供静态页面服务
   - 解析 HTTP 请求行（GET /path HTTP/1.1）
@@ -435,6 +440,56 @@ Network statistics:
 ```
 TinyOS> rand
 963418056
+```
+
+**`netstat -r` — 重置网络统计**
+```
+TinyOS> netstat -r
+Network statistics reset.
+```
+
+**`dhcp` — 通过 DHCP 获取 IP 配置**
+```
+TinyOS> dhcp
+Sending DHCP Discover...
+DHCP result:
+  IP:      10.0.2.15
+  Gateway: 10.0.2.2
+  Mask:    255.255.255.0
+```
+> DHCP 向 QEMU 内置 DHCP 服务器（10.0.2.2）发送 Discover/Offer/Request/ACK 四步协商，动态获取 IP 地址。
+
+**`tcp-recv <port>` — 监听 TCP 端口（10秒）**
+```
+TinyOS> tcp-recv 80
+Listening for TCP on port 80 (10 seconds)...
+
+[TCP 10.0.2.2:54321] (85 bytes)
+GET / HTTP/1.1
+Host: localhost
+...
+
+Done listening on TCP port 80.
+```
+> 与 `webserver` 命令类似，但仅显示接收到的数据，不发送响应。用于调试 TCP 连接。
+
+**`write <file> <text>` — 写文件到 FAT16 磁盘**
+```
+TinyOS> write note.txt Hello World!
+Wrote 12 bytes to note.txt
+
+TinyOS> ls
+Directory listing:
+Name             Size  Type
+--------------------------------------
+NOTE.TXT            12  FILE
+```
+> 支持创建新文件和覆写现有文件。文件名支持 8.3 格式（最多 8字符名 + 3字符扩展名）。
+
+**`rm <file>` — 删除文件**
+```
+TinyOS> rm note.txt
+Deleted note.txt
 ```
 
 #### 双向通信示例

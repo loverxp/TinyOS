@@ -186,4 +186,35 @@ int  net_tcp_send(uint32_t dst_ip, uint16_t dst_port,
                   const void* data, uint16_t len, uint8_t flags);
 int  net_tcp_close(uint32_t dst_ip, uint16_t dst_port);
 
+/* DHCP */
+int net_dhcp_discover(void);
+
+/* Socket abstraction layer */
+#define SOCK_STREAM  1   /* TCP */
+#define SOCK_DGRAM   2   /* UDP */
+#define MAX_SOCKETS  8
+
+typedef struct {
+    int type;           /* SOCK_STREAM or SOCK_DGRAM */
+    uint16_t local_port;
+    uint32_t remote_ip;
+    uint16_t remote_port;
+    int active;         /* 1 = in use */
+    /* Receive buffer (ring buffer) */
+    uint8_t  rx_buf[1024];
+    uint16_t rx_head;
+    uint16_t rx_tail;
+    uint16_t rx_count;
+} socket_t;
+
+int  sock_create(int type);
+int  sock_bind(int fd, uint16_t port);
+int  sock_connect(int fd, uint32_t ip, uint16_t port);
+int  sock_send(int fd, const void* data, uint16_t len);
+int  sock_recv(int fd, void* buf, uint16_t max_len, uint32_t timeout_ms);
+int  sock_listen(int fd);
+int  sock_accept(int fd, uint32_t* out_ip, uint16_t* out_port);
+void sock_close(int fd);
+void net_socket_init(void);
+
 #endif /* NET_H */

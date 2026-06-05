@@ -59,6 +59,25 @@ static void shell_udp_recv_cb(uint32_t src_ip, uint16_t src_port,
     printf("\n");
 }
 
+/* TCP recv callback for 'tcp-recv' command */
+static void shell_tcp_recv_cb(uint32_t src_ip, uint16_t src_port,
+                               const uint8_t* data, uint16_t len) {
+    printf("\n[TCP %u.%u.%u.%u:%u] (%u bytes)\n",
+           src_ip & 0xFF, (src_ip >> 8) & 0xFF,
+           (src_ip >> 16) & 0xFF, (src_ip >> 24) & 0xFF,
+           src_port, len);
+    uint16_t show = len < 512 ? len : 512;
+    for (uint16_t i = 0; i < show; i++) {
+        char c = (char)data[i];
+        if (c >= 32 && c < 127) {
+            vga_putchar(c);
+            serial_putchar(c);
+        }
+    }
+    if (show < len) printf("...");
+    printf("\n");
+}
+
 void shell_char_callback(char c) {
     if (c == '\n' || c == '\r') {
         vga_putchar('\n');
@@ -400,7 +419,7 @@ static volatile uint32_t schedtest_deadline = 0;
 static void schedtest_a(void) {
     while (timer_get_ticks() < schedtest_deadline) {
         printf("A ");
-        asm volatile("hlt");
+        task_sleep(200);  /* sleep 200ms, exercises yield/sleep */
     }
     printf("\n[task_a] Time's up, exiting.\n");
     task_exit();
@@ -409,7 +428,7 @@ static void schedtest_a(void) {
 static void schedtest_b(void) {
     while (timer_get_ticks() < schedtest_deadline) {
         printf("B ");
-        asm volatile("hlt");
+        task_sleep(200);  /* sleep 200ms, exercises yield/sleep */
     }
     printf("\n[task_b] Time's up, exiting.\n");
     task_exit();
@@ -600,10 +619,15 @@ static void shell_handle_command(const char* cmd) {
             printf("  ping <ip>  - Send ICMP echo request\n");
             printf("  send <ip> <port> <msg> - Send UDP packet\n");
             printf("  recv <port> - Listen for UDP packets (5s)\n");
+            printf("  tcp-recv <port> - Listen for TCP connections (10s)\n");
+            printf("  dhcp       - Request IP via DHCP\n");
             printf("  arp        - Show ARP cache\n");
             printf("  arp -c     - Clear ARP cache\n");
             printf("  netstat    - Show network statistics\n");
+            printf("  netstat -r - Reset network statistics\n");
             printf("  rand       - Show a random number (PRNG)\n");
+            printf("  write <file> <text> - Write text to file (FAT16)\n");
+            printf("  rm <file>  - Delete a file from disk\n");
             printf("  webserver  - Start HTTP server (port 80, hostfwd :8088)\n");
             printf("  webserver stop - Stop HTTP server\n");
             printf("  date       - Show current date/time (CMOS RTC)\n");
@@ -846,6 +870,9 @@ static void shell_handle_command(const char* cmd) {
         printf("  ICMP: %u sent, %u recv\n", s->icmp_sent, s->icmp_recv);
         printf("  UDP:  %u sent, %u recv\n", s->udp_sent, s->udp_recv);
         printf("  TCP:  %u sent, %u recv\n", s->tcp_sent, s->tcp_recv);
+    } else if (strcmp(cmd, "netstat -r") == 0) {
+        net_stats_reset();
+        printf("Network statistics reset.\n");
     } else if (strncmp(cmd, "recv ", 5) == 0) {
         const char* arg = cmd + 5;
         while (*arg == ' ') arg++;
@@ -873,6 +900,88 @@ static void shell_handle_command(const char* cmd) {
     } else if (strcmp(cmd, "rand") == 0) {
         prng_seed(timer_get_ticks());
         printf("%u\n", prng_next());
+    } else if (strncmp(cmd, "write ", 6) == 0) {
+        /* write <file> <text> */
+        const char* arg = cmd + 6;
+        while (*arg == ' ') arg++;
+        const char* fname = arg;
+        /* find end of filename */
+        while (*arg && *arg != ' ') arg++;
+        uint32_t fname_len = (uint32_t)(arg - fname);
+        if (fname_len == 0 || fname_len > 12) {
+            printf("Usage: write <file> <text>\n");
+            return;
+        }
+        char fname_buf[13];
+        memcpy(fname_buf, fname, fname_len);
+        fname_buf[fname_len] = '\0';
+        /* skip to text */
+        while (*arg == ' ') arg++;
+        if (*arg == '\0') {
+            printf("Usage: write <file> <text>\n");
+            return;
+        }
+        uint32_t text_len = strlen(arg);
+        if (fat16_write(fname_buf, arg, text_len) == 0) {
+            printf("Wrote %u bytes to %s\n", text_len, fname_buf);
+        } else {
+            printf("Failed to write %s\n", fname_buf);
+        }
+    } else if (strncmp(cmd, "tcp-recv ", 9) == 0) {
+        const char* arg = cmd + 9;
+        while (*arg == ' ') arg++;
+        uint32_t port = 0;
+        while (*arg >= '0' && *arg <= '9') {
+            port = port * 10 + (*arg++ - '0');
+        }
+        if (port == 0 || port > 65535) {
+            printf("Usage: tcp-recv <port>\n");
+        } else {
+            printf("Listening for TCP on port %u (10 seconds)...\n", port);
+            outb(0x20, 0x20);  /* EOI for keyboard IRQ1 */
+            net_tcp_listen((uint16_t)port);
+            net_set_tcp_callback(shell_tcp_recv_cb);
+            enable_interrupts();
+            uint32_t deadline = timer_get_ticks() + 500;  /* 10 seconds */
+            while (timer_get_ticks() < deadline) {
+                asm volatile("hlt");
+            }
+            net_set_tcp_callback(NULL);
+            printf("\nDone listening on TCP port %u.\n", port);
+            shell_prompt();
+        }
+    } else if (strcmp(cmd, "dhcp") == 0) {
+        printf("Sending DHCP Discover...\n");
+        outb(0x20, 0x20);  /* EOI for keyboard IRQ1 */
+        enable_interrupts();
+        int ret = net_dhcp_discover();
+        if (ret == 0) {
+            /* Poll for DHCP Offer and wait for ACK */
+            uint32_t start = timer_get_ticks();
+            uint32_t ip, gw, mask;
+            while (timer_get_ticks() - start < 250) {  /* 5 second timeout */
+                ne2000_poll_recv();
+                net_get_config(&ip, &gw, &mask);
+                if (ip != 0 && ip != 0x0F00000A) break;  /* changed from default */
+            }
+            net_get_config(&ip, &gw, &mask);
+            printf("DHCP result:\n");
+            printf("  IP:      %u.%u.%u.%u\n", ip & 0xFF, (ip >> 8) & 0xFF, (ip >> 16) & 0xFF, (ip >> 24) & 0xFF);
+            printf("  Gateway: %u.%u.%u.%u\n", gw & 0xFF, (gw >> 8) & 0xFF, (gw >> 16) & 0xFF, (gw >> 24) & 0xFF);
+            printf("  Mask:    %u.%u.%u.%u\n", mask & 0xFF, (mask >> 8) & 0xFF, (mask >> 16) & 0xFF, (mask >> 24) & 0xFF);
+        } else {
+            printf("DHCP failed.\n");
+        }
+    } else if (strncmp(cmd, "rm ", 3) == 0) {
+        const char* fname = cmd + 3;
+        while (*fname == ' ') fname++;
+        if (*fname == '\0') {
+            printf("Usage: rm <file>\n");
+        } else if (fat16_delete(fname) == 0) {
+            printf("Deleted %s\n", fname);
+        } else {
+            printf("File not found: %s\n", fname);
+        }
     } else {
         printf("Unknown command: %s\n", cmd);
         printf("Type 'help' for available commands.\n");

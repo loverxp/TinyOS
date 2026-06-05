@@ -250,6 +250,8 @@ void register_interrupt_handler(uint8_t n, void (*handler)(void)) {
 extern uint32_t timer_get_ticks(void);
 extern uint32_t keyboard_read_key(void);
 extern void keyboard_clear_buffer(void);
+extern void task_yield(void);
+extern void task_sleep(uint32_t ms);
 
 // ── VGA Font Save/Restore ─────────────────────────────────────────────
 // Mode 13h (chain-4) writing to 0xA0000 corrupts the font data in VGA plane 2.
@@ -654,6 +656,18 @@ void syscall_handler(uint32_t* regs) {
         // Syscall 7: write string to VGA console (arg1 = string pointer)
         const char* s = (const char*)arg1;
         if (s) vga_writestring(s);
+        return;
+    }
+
+    if (syscall_no == 8) {
+        // Syscall 8: yield CPU to other tasks
+        task_yield();
+        return;
+    }
+
+    if (syscall_no == 9) {
+        // Syscall 9: sleep for N milliseconds (arg1 = ms)
+        task_sleep(arg1);
         return;
     }
 

@@ -82,7 +82,9 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - `kernel/wm.c` / `include/window.h`: 窗口管理器（窗口创建/移动/关闭、Z-order、标题栏、鼠标事件）
 - `lib/prng.c` / `include/prng.h`: 伪随机数生成器 (xorshift32)
 - `lib/debug.c` / `include/debug.h`: 调试输出框架 (`kprintf` 四级日志、内核栈回溯)
-- `kernel/net.c`: 网络协议栈（ARP / IPv4 / ICMP / UDP / TCP），含 ARP 表访问 API 和网络统计
+- `kernel/net.c`: 网络协议栈（ARP / IPv4 / ICMP / UDP / TCP / DHCP），含 ARP 表访问 API、网络统计、Socket 抽象层
+- `kernel/fat16.c`: FAT16 文件系统（读/写/删除，FAT 链分配/释放）
+- `drivers/ata.c`: ATA PIO 驱动（读/写扇区，CACHE FLUSH）
 
 ## 内存布局
 - 内核加载地址: 0x100000 (1MB)
@@ -124,14 +126,23 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 
 ## 网络命令使用说明
 - **`recv <port>`**: 监听 UDP 端口 5 秒。注意只能监听 QEMU `hostfwd` 中配置的端口（默认 8888）。其他端口需先在 Makefile 添加 `hostfwd=udp::<port>-:<port>`
+- **`tcp-recv <port>`**: 监听 TCP 端口 10 秒，显示接收到的 TCP 数据（不发送响应）
 - **`arp`** / **`arp -c`**: 显示或清空 ARP 缓存表
 - **`netstat`**: 显示网络收发统计（ARP/ICMP/UDP/TCP 各协议的发送/接收包数、错误数）
+- **`netstat -r`**: 重置网络统计计数器
+- **`dhcp`**: 发送 DHCP Discover/Offer/Request/ACK 四步协商，动态获取 IP/网关/掩码
 - **`rand`**: 生成随机数（以 timer ticks 为种子的 xorshift32）
-- **`ping <ip>`** / **`send <ip> <port> <msg>`**: 发送 ICMP 或 UDP，首次会自动 ARP 解析
+- **`ping <ip>`** / **`send <ip> <port> <msg>`**: 发送 ICMP 和 UDP，首次会自动 ARP 解析
+- **`write <file> <text>`**: 创建或覆写文件到 FAT16 磁盘。文件名 8.3 格式，文本不支持引号
+- **`rm <file>`**: 删除文件，释放 FAT 链和目录项
 - **Windows 发送 UDP 到 TinyOS**（Windows 无 netcat）:
   ```powershell
   python -c "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.sendto(b'Hello', ('127.0.0.1', 8888)); s.close()"
   ```
+
+## yield/sleep 系统调用
+- **Syscall 8**: `yield()` — 主动让出 CPU，触发 `need_reschedule=1`
+- **Syscall 9**: `sleep(ms)` — 睡眠指定毫秒数（定时器 50Hz，精度 20ms），设置 `sleep_deadline`，调度器在 `prepare_switch()` 中自动唤醒到期任务
 
 ## 已知问题（搁置）
 - **退出 GUI 后键盘可能无响应**: `cmd_gui` 退出流程中 `shell_char_callback` 重注册时机与键盘中断存在竞态，或 `enable_interrupts()` 前后 8042 状态不一致。临时绕过：使用串口终端
