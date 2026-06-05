@@ -33,7 +33,7 @@ C_SRCS    = kernel/kernel.c kernel/shell.c kernel/except.c kernel/gdt.c \
             kernel/tss.c kernel/pmm.c kernel/paging.c kernel/mm.c kernel/loader.c \
             kernel/scheduler.c kernel/fat16.c kernel/net.c \
             drivers/vga.c drivers/keyboard.c drivers/timer.c drivers/interrupts.c \
-            drivers/ata.c drivers/pci.c drivers/ne2000.c \
+            drivers/ata.c drivers/pci.c drivers/ne2000.c drivers/serial.c \
             lib/string.c lib/stdio.c
 ASM_SRCS  = boot/boot.asm drivers/interrupts.asm drivers/gdt.asm \
             drivers/io.asm kernel/user.asm kernel/embedded_user.asm \
@@ -99,10 +99,11 @@ $(BUILD)/%_asm.o: kernel/%.asm | $(BUILD)
 $(BUILD):
 	@-mkdir $(BUILD) 2>nul
 
-# Run
+# Run (VGA window + PS/2 keyboard, no serial redirect)
 run: $(TARGET)
 	$(QEMU) -kernel $(TARGET) -m 32 -vga std -drive file=disk.img,format=raw,if=ide -netdev user,id=net0,hostfwd=udp::8888-:8888 -device ne2k_pci,netdev=net0
 
+# Run with serial debug logging
 run-debug: $(TARGET) | logs
 	$(QEMU) -kernel $(TARGET) -m 32 -vga std -serial file:logs/serial.log -drive file=disk.img,format=raw,if=ide -netdev user,id=net0,hostfwd=udp::8888-:8888 -device ne2k_pci,netdev=net0
 

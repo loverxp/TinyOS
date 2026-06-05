@@ -823,3 +823,66 @@ if (ret < 0) {
 搁置，待排查。可能原因：
 - 用户程序栈页面未正确释放（`pmm_free_page` 后 PMM 位图状态不一致）
 - 物理内存管理器的位图分配/释放逻辑问题
+
+---
+
+## 问题22：串口 Shell 输入无响应（FIFO 触发级别过高）
+
+### 现象
+串口模式下（`make run-serial`）可以看到启动日志和提示符，但键盘输入无任何反应。
+
+### 根本原因
+UART 16550 FIFO 配置的**中断触发级别**设为 14 字节（`FCR = 0xC7`，bits 7-6 = 11）。用户输入的字符少于 14 个时，FIFO 不会触发 IRQ 4，直到积累到 14 字节或超时。
+
+### 解决
+将 FCR 改为 `0x07`（bits 7-6 = 00），触发级别降至 **1 字节**，每个字符立刻触发中断：
+```c
+outb(0x3FA, 0x07);   // FCR: enable FIFO, clear, trigger at 1 byte
+```
+
+### 验证
+串口 Shell 即时响应输入的每个字符。
+
+---
+
+## 问题23：串口终端按 Enter 无效（CR vs LF 差异）
+
+### 现象
+串口模式下输入命令后按回车无反应，命令不执行。
+
+### 根本原因
+串口终端按下 Enter 时发送的是 `\r`（CR, ASCII 13），但 `shell_char_callback` 只检查 `c == '\n'`（LF, ASCII 10）。`\r` 的值（13 < 32）落在 `else if (c >= 32)` 条件之外，被**静默丢弃**。
+
+键盘驱动（PS/2）按 Enter 发送的是 `\n`（由 `keyboard.c` 翻译），所以 VGA 模式下无此问题。
+
+### 解决
+在 `shell_char_callback` 中将 `\r` 视同为行终止符：
+```c
+if (c == '\n' || c == '\r') {
+```
+
+### 经验教训
+> 串口终端使用 CR (`\r`) 作为行终止符，而 Unix 风格使用 LF (`\n`)。
+> 实现双终端（VGA 键盘 + 串口）时，Shell 必须同时处理两种行终止符。
+
+---
+
+## 问题24：`make run` 模式下终端无法输入
+
+### 现象
+`make run` 启动后，在启动 QEMU 的终端中输入无反应。
+
+### 根本原因
+`make run` 添加了 `-serial file:logs/serial.log` 参数，串口被设为**只写文件模式**，不接收终端输入。
+
+### 解决
+将 `make run` 恢复为无 `-serial` 参数（VGA 窗口 + PS/2 键盘），新增 `make run-debug` 用于串口日志记录：
+
+| 命令 | 模式 | 串口 | 输入方式 |
+|------|------|------|----------|
+| `make run` | VGA 窗口 | 无 | QEMU 窗口键盘 |
+| `make run-debug` | VGA 窗口 | 写入文件 | QEMU 窗口键盘 |
+| `make run-serial` | 纯终端 | 连接到终端 | 终端键盘 |
+
+### 涉及文件
+- `Makefile`: `run` / `run-debug` / `run-serial` 三个独立目标

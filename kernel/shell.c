@@ -16,6 +16,7 @@
 #include "../include/pci.h"
 #include "../include/ne2000.h"
 #include "../include/net.h"
+#include "../include/serial.h"
 
 #define LINE_BUF_SIZE 256
 
@@ -24,26 +25,32 @@ static size_t line_pos = 0;
 
 static void shell_prompt(void) {
     vga_writestring("TinyOS> ");
+    serial_writestring("TinyOS> ");
 }
 
 static void shell_handle_command(const char* cmd);
 
 void shell_char_callback(char c) {
-    if (c == '\n') {
+    if (c == '\n' || c == '\r') {
         vga_putchar('\n');
+        serial_putchar('\n');
         line_buffer[line_pos] = '\0';
         shell_handle_command(line_buffer);
         line_pos = 0;
         shell_prompt();
-    } else if (c == '\b') {
+    } else if (c == '\b' || c == 127) {
         if (line_pos > 0) {
             line_pos--;
             vga_putchar('\b');
+            serial_putchar('\b');
+            serial_putchar(' ');
+            serial_putchar('\b');
         }
     } else if (c >= 32 && c < 127) {
         if (line_pos < LINE_BUF_SIZE - 1) {
             line_buffer[line_pos++] = c;
             vga_putchar(c);
+            serial_putchar(c);
         }
     }
 }
@@ -80,19 +87,11 @@ static pos_t old_tail;
 #define DIR_LEFT 2
 #define DIR_RIGHT 3
 
-static void serial_write(char c) {
-    while ((inb(0x3FD) & 0x20) == 0);
-    outb(0x3F8, c);
-}
-
-static void serial_string(const char* s) {
-    while (*s) serial_write(*s++);
-}
-
+/* Debug hex output to serial (used in interrupt context) */
 static void serial_hex(uint32_t n) {
     char hex[] = "0123456789ABCDEF";
     for (int i = 28; i >= 0; i -= 4) {
-        serial_write(hex[(n >> i) & 0xF]);
+        serial_putchar(hex[(n >> i) & 0xF]);
     }
 }
 
@@ -172,9 +171,9 @@ static void spawn_food(void) {
 }
 
 static void snake_raw_cb(uint8_t scancode, uint8_t extended) {
-    serial_string("[SNAKE] Key: 0x");
+    serial_writestring("[SNAKE] Key: 0x");
     serial_hex(scancode);
-    serial_string("\n");
+    serial_putchar('\n');
     
     if (game_over) {
         running = 0;
@@ -665,5 +664,6 @@ static void shell_handle_command(const char* cmd) {
 
 void shell_init(void) {
     keyboard_register_char_callback(shell_char_callback);
+    serial_register_callback(shell_char_callback);
     shell_prompt();
 }

@@ -16,9 +16,9 @@
 使用 Makefile 增量构建（推荐）：
 ```bash
 make              # 构建内核和用户程序
-make run          # 构建并运行
-make run-debug    # 构建并运行（串口调试输出）
-make run-serial   # 构建并运行（纯串口模式）
+make run          # 构建并运行（VGA 窗口 + PS/2 键盘）
+make run-debug    # 构建并运行（VGA 窗口 + 串口日志到文件）
+make run-serial   # 构建并运行（纯串口模式，-nographic）
 make clean        # 清理构建产物
 make rebuild      # 清理并重新构建
 make user-programs # 仅编译用户程序
@@ -49,7 +49,7 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - `boot/`: 启动代码
 - `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, mm.c, except.c, loader.c, scheduler.c, embedded_user.asm, user.asm, switch.asm）
 - `user/`: 用户程序（crt0.s, hello.c, user.ld, build.bat）
-- `drivers/`: 设备驱动（VGA、键盘、定时器、中断、GDT、I/O）
+- `drivers/`: 设备驱动（VGA、键盘、定时器、中断、GDT、串口、I/O）
 - `lib/`: 库函数（字符串处理、printf/sprintf 格式化输出）
 - `include/`: 头文件
 - `tools/`: 交叉编译工具链（已下载到本地）
@@ -71,6 +71,8 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - `kernel/mm.c`: 堆内存分配器（kmalloc/kfree）
 - `lib/stdio.c`: printf/sprintf 格式化输出实现
 - `kernel/net.c`: 网络协议栈（ARP / IPv4 / ICMP / UDP）
+- `drivers/serial.c`: 串口驱动（COM1 中断收发、环形缓冲区、回调注册）
+- `include/serial.h`: 串口驱动接口定义
 - `drivers/ne2000.c`: NE2000 网卡驱动（PCI 发现、远程 DMA、环形缓冲区接收）
 - `drivers/pci.c`: PCI 总线扫描（配置空间读写、BAR、IRQ 获取）
 - `include/net.h`: 网络协议数据结构（eth/arp/ip/icmp/udp 头）

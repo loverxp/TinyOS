@@ -16,6 +16,7 @@
 #include "../include/pci.h"
 #include "../include/ne2000.h"
 #include "../include/net.h"
+#include "../include/serial.h"
 
 // User mode entry points (from user.asm)
 extern void run_user_task(void (*entry)(void));
@@ -28,37 +29,31 @@ void test_user_mode(void) {
     printf("Back in kernel mode! Test passed.\n");
 }
 
-static void serial_write(char c) {
-    while ((inb(0x3FD) & 0x20) == 0);
-    outb(0x3F8, c);
-}
+// VGA video memory
+static volatile uint16_t* const vga_mem = (uint16_t*)0xB8000;
 
-static void serial_string(const char* s) {
-    while (*s) serial_write(*s++);
-}
-
-static void serial_hex(uint32_t n) {
-    char hex[] = "0123456789ABCDEF";
-    for (int i = 28; i >= 0; i -= 4) {
-        serial_write(hex[(n >> i) & 0xF]);
-    }
-}
-
-// Called every second from timer interrupt - update VGA status bar
+// Called every second from timer interrupt - update VGA status bar only (no serial, no cursor move)
 void on_timer_second(void) {
     uint32_t ticks = timer_get_ticks();
     uint32_t secs = ticks / 50;
 
-    // Get memory stats
     uint32_t heap_used = kmalloc_get_used();
     uint32_t heap_total = kmalloc_get_total();
     uint32_t mem_free = pmm_get_free_pages() * 4;  // in KB
 
-    size_t save_row = vga_get_cursor_row();
-    size_t save_col = vga_get_cursor_column();
-    vga_set_cursor(VGA_HEIGHT - 1, 0);
-    printf("Uptime: %us  Heap: %uK/%uK  Mem: %uM free        ", secs, heap_used / 1024, heap_total / 1024, mem_free / 1024);
-    vga_set_cursor(save_row, save_col);
+    char buf[80];
+    int n = sprintf(buf, "Uptime: %us  Heap: %uK/%uK  Mem: %uM free", secs, heap_used / 1024, heap_total / 1024, mem_free / 1024);
+
+    uint8_t color = vga_entry_color(VGA_COLOR_DARK_GREY, VGA_COLOR_BLACK);
+    int row = VGA_HEIGHT - 1;
+    int col;
+    for (col = 0; col < n && col < VGA_WIDTH; col++) {
+        vga_mem[row * VGA_WIDTH + col] = (uint16_t)buf[col] | (uint16_t)color << 8;
+    }
+    // Clear rest of the status line
+    for (; col < VGA_WIDTH; col++) {
+        vga_mem[row * VGA_WIDTH + col] = (uint16_t)' ' | (uint16_t)color << 8;
+    }
 }
 
 void kernel_main(uint32_t multiboot_info_addr) {
@@ -68,83 +63,90 @@ void kernel_main(uint32_t multiboot_info_addr) {
     outb(0x3F8, 0x01);
     outb(0x3F9, 0x00);
     outb(0x3FB, 0x03);
-    outb(0x3FA, 0xC7);
+    outb(0x3FA, 0x07);   // FCR: enable FIFO, clear, trigger at 1 byte
     outb(0x3FC, 0x0B);
 
-    serial_string("=== TinyOS Debug ===\n");
+    serial_writestring("=== TinyOS Debug ===\n");
 
     gdt_init();
-    serial_string("[OK] GDT\n");
+    serial_writestring("[OK] GDT\n");
 
     vga_initialize();
     vga_save_font();
     vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     printf("TinyOS v0.1 - Kernel Loaded\n");
     printf("==========================\n\n");
-    serial_string("[OK] VGA\n");
+    serial_writestring("[OK] VGA\n");
 
     // Initialize physical memory manager
     pmm_init(multiboot_info_addr);
     printf("[OK] Physical memory: %u MB (%u free pages)\n", pmm_get_total_memory_kb() / 1024, pmm_get_free_pages());
-    serial_string("[OK] PMM\n");
+    serial_writestring("[OK] PMM\n");
 
     // Initialize kernel heap allocator
     mm_init();
     printf("[OK] Kernel heap initialized\n");
-    serial_string("[OK] MM\n");
+    serial_writestring("[OK] MM\n");
 
     // Initialize paging (identity map first 8MB)
     paging_init();
-    serial_string("[OK] Paging\n");
+    serial_writestring("[OK] Paging\n");
 
     // Initialize TSS for Ring 3 -> Ring 0 transitions
     // Allocate a dedicated 4KB kernel stack for TSS
     static uint8_t tss_kernel_stack[4096] __attribute__((aligned(16)));
     tss_init((uint32_t)tss_kernel_stack + 4096);
     printf("[OK] TSS initialized\n");
-    serial_string("[OK] TSS\n");
+    serial_writestring("[OK] TSS\n");
 
     idt_initialize();
     printf("[OK] IDT initialized\n");
-    serial_string("[OK] IDT\n");
+    serial_writestring("[OK] IDT\n");
 
     pic_initialize();
     printf("[OK] PIC initialized\n");
-    serial_string("[OK] PIC\n");
+    serial_writestring("[OK] PIC\n");
 
     timer_initialize(50);
     timer_register_second_callback(on_timer_second);
     register_interrupt_handler(32, timer_handler);
     pic_unmask_irq(0);
     printf("[OK] Timer initialized (50 Hz)\n");
-    serial_string("[OK] Timer\n");
+    serial_writestring("[OK] Timer\n");
 
     keyboard_initialize();
     register_interrupt_handler(33, keyboard_handler);
     pic_unmask_irq(1);
     printf("[OK] Keyboard initialized\n");
-    serial_string("[OK] Keyboard\n");
+    serial_writestring("[OK] Keyboard\n");
+
+    /* Initialize serial RX interrupt (COM1, IRQ 4) */
+    serial_init();
+    register_interrupt_handler(36, serial_handler);
+    pic_unmask_irq(4);
+    printf("[OK] Serial shell (COM1, IRQ 4)\n");
+    serial_writestring("[OK] Serial RX\n");
 
     shell_init();
     printf("[OK] Shell initialized\n");
-    serial_string("[OK] Shell\n");
+    serial_writestring("[OK] Shell\n");
 
     enable_interrupts();
     printf("[OK] Interrupts enabled\n\n");
-    serial_string("[OK] Interrupts enabled\n");
+    serial_writestring("[OK] Interrupts enabled\n");
 
     scheduler_init();
-    serial_string("[OK] Scheduler\n");
+    serial_writestring("[OK] Scheduler\n");
 
     /* Initialize ATA disk driver */
     if (ata_init() == 0) {
         printf("[OK] ATA disk detected\n");
-        serial_string("[OK] ATA\n");
+        serial_writestring("[OK] ATA\n");
 
         /* Initialize FAT16 filesystem */
         if (fat16_init() == 0) {
             printf("[OK] FAT16 filesystem mounted\n");
-            serial_string("[OK] FAT16\n");
+            serial_writestring("[OK] FAT16\n");
         } else {
             printf("[!!] FAT16 init failed\n");
         }
@@ -155,12 +157,12 @@ void kernel_main(uint32_t multiboot_info_addr) {
     /* Scan PCI bus */
     pci_scan();
     printf("[OK] PCI: %d device(s)\n", pci_get_device_count());
-    serial_string("[OK] PCI\n");
+    serial_writestring("[OK] PCI\n");
 
     /* Initialize NE2000 network driver */
     if (ne2000_init() == 0) {
         printf("[OK] NE2000 network card\n");
-        serial_string("[OK] NE2000\n");
+        serial_writestring("[OK] NE2000\n");
 
         /* Register NE2000 IRQ handler */
         register_interrupt_handler(32 + 11, ne2000_handler);  /* IRQ 11 */
@@ -170,7 +172,7 @@ void kernel_main(uint32_t multiboot_info_addr) {
         /* QEMU user-mode: host=10.0.2.2, guest=10.0.2.15, gateway=10.0.2.2 */
         net_init(IP4(10, 0, 2, 15), IP4(10, 0, 2, 2), IP4(255, 255, 255, 0));
         printf("[OK] Network stack (10.0.2.15)\n");
-        serial_string("[OK] NET\n");
+        serial_writestring("[OK] NET\n");
 
         /* Set NE2000 receive callback to net handler */
         ne2000_set_recv_callback(net_recv_handler);
@@ -180,7 +182,7 @@ void kernel_main(uint32_t multiboot_info_addr) {
 
     printf("Type 'help' for available commands.\n\n");
 
-    serial_string("Ready, entering main loop...\n");
+    serial_writestring("Ready, entering main loop...\n");
 
     // Event-driven main loop: shell runs in kernel mode (Ring 0)
     while (1) {

@@ -2,6 +2,7 @@
 #include "../include/vga.h"
 #include "../include/io.h"
 #include "../include/string.h"
+#include "../include/serial.h"
 
 // Internal buffer for formatting
 #define PRINTF_BUF_SIZE 1024
@@ -201,7 +202,7 @@ int sprintf(char* buf, const char* fmt, ...) {
     return ret;
 }
 
-// Print formatted string to VGA
+// Print formatted string to VGA and serial
 void printf(const char* fmt, ...) {
     char buf[PRINTF_BUF_SIZE];
     __builtin_va_list args;
@@ -209,35 +210,29 @@ void printf(const char* fmt, ...) {
     vsprintf_internal(buf, fmt, args);
     __builtin_va_end(args);
     vga_writestring(buf);
+    serial_writestring(buf);
 }
 
 // Print a single character
 void putchar(char c) {
     vga_putchar(c);
+    serial_putchar(c);
 }
 
 // Print a string with newline
 void puts(const char* s) {
     vga_writestring(s);
     vga_putchar('\n');
+    serial_writestring(s);
+    serial_putchar('\n');
 }
 
-// Serial output helper
-static void serial_putc(char c) {
-    while ((inb(0x3FD) & 0x20) == 0);
-    outb(0x3F8, c);
-}
-
-// Print formatted string to serial port
+// Print formatted string to serial port (uses driver)
 void serial_printf(const char* fmt, ...) {
     char buf[PRINTF_BUF_SIZE];
     __builtin_va_list args;
     __builtin_va_start(args, fmt);
     vsprintf_internal(buf, fmt, args);
     __builtin_va_end(args);
-    
-    char* s = buf;
-    while (*s) {
-        serial_putc(*s++);
-    }
+    serial_writestring(buf);
 }
