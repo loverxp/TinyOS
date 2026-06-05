@@ -22,6 +22,7 @@
 #include "../include/mouse.h"
 #include "../include/vbe.h"
 #include "../include/builtin_font.h"
+#include "../include/webserver.h"
 
 #define LINE_BUF_SIZE 256
 
@@ -575,6 +576,8 @@ static void shell_handle_command(const char* cmd) {
             printf("  net        - Show network config\n");
             printf("  ping <ip>  - Send ICMP echo request (ARP)\n");
             printf("  send <ip> <port> <msg> - Send UDP packet\n");
+            printf("  webserver  - Start HTTP server (port 80, hostfwd :8088)\n");
+            printf("  webserver stop - Stop HTTP server\n");
     } else if (strcmp(cmd, "clear") == 0) {
         vga_clear_screen(VGA_COLOR_BLACK);
         vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
@@ -796,6 +799,14 @@ static void shell_handle_command(const char* cmd) {
             }
         } else {
             printf("Usage: send A.B.C.D <port> <message>\n");
+        }
+    } else if (strncmp(cmd, "webserver", 9) == 0) {
+        const char* arg = cmd + 9;
+        while (*arg == ' ') arg++;
+        if (strcmp(arg, "stop") == 0) {
+            webserver_stop();
+        } else {
+            webserver_start();
         }
     } else {
         printf("Unknown command: %s\n", cmd);

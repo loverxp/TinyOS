@@ -39,7 +39,7 @@
   - 支持增量编译（只重新编译修改过的文件）
   - 自动处理文件依赖关系
   - 简化新文件的添加流程
-- [ ] **GDB 内核调试集成**
+- [x] **GDB 内核调试集成**
   - 通过 QEMU `-s -S` 连接 GDB
   - 支持源码级断点调试
   - `.gdbinit` 配置脚本
@@ -266,7 +266,7 @@ struct page_directory_entry {
 
 ---
 
-## 第五阶段：网络与高级功能 (v1.0+) ✅ 网络部分完成
+## 第五阶段：网络与高级功能 (v1.0+) ✅ 网络部分已完成
 
 ### 5.1 网络协议栈（已实现基础功能）
 
@@ -299,6 +299,17 @@ struct page_directory_entry {
   - UDP 数据报发送/接收
   - Shell 命令：`send <ip> <port> <msg>`
 
+- [x] **TCP**
+  - 三次握手/四次挥手，连接状态机（LISTEN/SYN_RCVD/ESTABLISHED/CLOSE_WAIT/LAST_ACK）
+  - 序列号/确认号管理，校验和计算
+  - `net_tcp_listen()` / `net_tcp_send()` / `net_tcp_close()` API
+  - 简易连接表（支持 4 个并发连接）
+
+- [x] **HTTP WebServer**
+  - 基于 TCP + HTTP 返回系统信息 HTML 页面
+  - Shell 命令：`webserver` / `webserver stop`
+  - 通过 QEMU `hostfwd=tcp::8088-:80` 从宿主机访问
+
 ### 5.1a 网络功能增强（近期待办）
 
 - [ ] **UDP 接收命令** — 添加 `recv <port>` 命令，TinyOS 可监听 UDP 端口接收主机数据
@@ -307,21 +318,19 @@ struct page_directory_entry {
 - [ ] **Shell 命令输出优化** — 移除 ping/send 的 `[1/4]` 调试输出，仅在出错时显示诊断信息
 - [ ] **DHCP 客户端** — 自动获取 IP/网关/掩码，替代硬编码 10.0.2.15
 - [ ] **DNS 解析** — 支持域名到 IP 的解析（查询 10.0.2.3）
-- [ ] **TCP 协议栈**
+- [x] **TCP 协议栈**
   - 三次握手（SYN → SYN-ACK → ACK），连接状态机
   - 序列号/确认号管理 + 校验和（复用 IP 校验和函数）
-  - 超时重传（RTO 定时器）
-  - 四次挥手（FIN 处理 + TIME_WAIT）
-  - 简易连接表（支持 4-8 个并发连接）
+  - 四次挥手（FIN 处理）
+  - 简易连接表（支持 4 个并发连接）
 - [ ] **Socket 抽象层**
   - `tcp_listen(port)` / `tcp_accept()` / `tcp_recv()` / `tcp_send()` / `tcp_close()`
   - 阻塞等待 + 与调度器协作（recv 阻塞时让出 CPU）
 - [ ] **HTTP 客户端** — 基于 TCP 实现 GET 请求，获取网页内容
-- [ ] **Web 服务器** — 基于 TCP + HTTP 提供静态文件服务
-  - 解析 HTTP 请求行（GET /path HTTP/1.1）和请求头
-  - 从 FAT16 磁盘读取文件，拼装 HTTP 响应（状态行 + Content-Type + Content-Length）
-  - 支持 200 OK / 404 Not Found 响应
-  - 并发连接处理（调度器 + 多任务）
+- [x] **Web 服务器** — 基于 TCP + HTTP 提供静态页面服务
+  - 解析 HTTP 请求行（GET /path HTTP/1.1）
+  - 返回 HTML 响应（状态行 + Content-Type）
+  - 支持 200 OK 响应
 - [ ] **SSH 服务器** — 基于 TCP 的加密远程 Shell
   - 需要 TCP + 熵源（PRNG）+ 加密算法（简易 AES 或 XOR 流密码）
   - 用户名/密码认证
@@ -331,9 +340,11 @@ struct page_directory_entry {
 
 **QEMU 网络配置**（已在 Makefile 中配置）：
 ```
--netdev user,id=net0,hostfwd=udp::8888-:8888
+-netdev user,id=net0,hostfwd=tcp::8088-:80,hostfwd=udp::8888-:8888
 -device ne2k_pci,netdev=net0
 ```
+
+> **为什么不能直接访问 10.0.2.15？** QEMU 的 `-netdev user` 创建一个隔离的虚拟网络，虚拟机内部 10.0.2.15 只在 QEMU 内部可见，宿主机无法直接路由。必须通过 `hostfwd` 规则将宿主机端口转发到虚拟机端口。反过来，虚拟机访问 `10.0.2.2` 可达宿主机，无需转发。
 
 **IP 配置**（QEMU user-mode networking）：
 | 角色 | IP | 说明 |
@@ -404,7 +415,7 @@ v0.1 ──> v0.15 ──> v0.2 ──> v0.3 ──> v0.4 ──> v0.5 ──> v
  ▼        ▼         ▼         ▼         ▼         ▼         ▼         ▼         ▼         ▼
 引导    构建系统   内存管理   异常处理   多任务✓   调度器✓   VFS      用户态    网络
 VGA     GDB调试   分页机制   printf    TCB✓     系统调用   RAMFS    crt0      GUI
-键盘    调试框架   堆分配器  蓝屏      上下文✓   同步     FAT12    libc      TCP/IP
+键盘    调试框架   堆分配器  蓝屏      上下文✓   同步     FAT12    libc      TCP/IP✓
 定时器   RTC驱动              栈回溯    IPC       锁      IDE       ELF加载  信号
 用户态   鼠标                            Spinlock           二进制加载  ACPI
 系统调用  PCI                              Mutex               用户程序   SMP
@@ -418,7 +429,7 @@ VGA     GDB调试   分页机制   printf    TCB✓     系统调用   RAMFS    
 
 | 阶段 | 必须完成 | 验证方法 |
 |------|----------|----------|
-| v0.15 | Makefile + GDB 调试 | `make qemu-gdb` 断点命中 |
+| v0.15 | Makefile + GDB 调试 (已完成) | `make run-gdb` + `make gdb` 断点命中 |
 | v0.2 | kmalloc/kfree 工作 | 分配内存并读写测试 |
 | v0.3 | 页故障正确处理 | 访问无效地址触发蓝屏 |
 | v0.4 | 两个任务交替运行 | `schedtest` 命令验证 A B 交替 |

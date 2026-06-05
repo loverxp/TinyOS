@@ -67,6 +67,8 @@
 | `net`         | 显示网络配置 (IP/网关/MAC)     |
 | `ping <IP>`   | 发送 ICMP Echo 请求           |
 | `send <IP> <端口> <消息>` | 发送 UDP 数据包        |
+| `webserver`   | 启动 HTTP 服务器（端口 80，宿主机 :8088 转发） |
+| `webserver stop` | 停止 HTTP 服务器              |
 
 ## 功能特性
 
@@ -104,7 +106,8 @@
 - ✅ FAT16 文件系统（只读，目录列表/文件读取）
 - ✅ PCI 总线扫描（配置空间读取，设备枚举）
 - ✅ NE2000 网卡驱动（远程 DMA，接收环形缓冲区，IRQ 处理）
-- ✅ 网络协议栈（ARP / IPv4 / ICMP / UDP）
+- ✅ 网络协议栈（ARP / IPv4 / ICMP / UDP / TCP）
+- ✅ HTTP WebServer（端口 80，基于 TCP，响应 HTML 页面）
 
 ## 项目结构
 
@@ -123,7 +126,8 @@ TinyOS/
 │   ├── loader.c           # 用户程序 ELF 加载器
 │   ├── scheduler.c        # 抢占式多任务调度器
 │   ├── fat16.c            # FAT16 文件系统解析器
-│   ├── net.c              # 网络协议栈 (ARP/IP/ICMP/UDP)
+│   ├── net.c              # 网络协议栈 (ARP/IP/ICMP/UDP/TCP)
+│   ├── webserver.c        # HTTP WebServer
 │   ├── wm.c               # 窗口管理器（创建/拖拽/关闭/Z-order）
 │   ├── embedded_user.asm  # 嵌入的 gfxsnake.elf
 │   └── user.asm           # 用户态入口和切换逻辑
@@ -182,6 +186,7 @@ TinyOS/
 │   ├── pci.h              # PCI 总线
 │   ├── ne2000.h           # NE2000 网卡
 │   ├── net.h              # 网络协议栈
+│   ├── webserver.h        # HTTP WebServer
 │   ├── vbe.h              # Bochs VBE 显卡
 │   ├── framebuf.h         # 帧缓冲抽象层
 │   ├── mouse.h            # PS/2 鼠标
@@ -498,9 +503,13 @@ scripts\mkfs.bat
 
 `make run` 会自动配置 QEMU user-mode 网络：
 ```
--netdev user,id=net0,hostfwd=udp::8888-:8888
+-netdev user,id=net0,hostfwd=tcp::8088-:80,hostfwd=udp::8888-:8888
 -device ne2k_pci,netdev=net0
 ```
+
+> **为什么不能直接访问 10.0.2.15？** QEMU 的 `-netdev user`（用户态网络）是一个隔离的虚拟网络。虚拟机内部的 10.0.2.15 只在 QEMU 内部可见，宿主机无法直接访问。必须通过 `hostfwd` 规则将宿主机的端口转发到虚拟机的端口。例如 `hostfwd=tcp::8088-:80` 表示：宿主机访问 `localhost:8088` 时，QEMU 自动转发到虚拟机的 `80` 端口。
+>
+> 反过来，虚拟机访问 `10.0.2.2` 可达宿主机（QEMU 内置网关），无需端口转发。
 
 ### 网络地址
 
@@ -580,3 +589,29 @@ $udp.Close()
 ```
 
 > 提示：从 TinyOS 发往主机的 UDP 数据包无需 `hostfwd` 端口转发，QEMU user-mode 网络默认可达主机（10.0.2.2）。`hostfwd` 仅用于主机向虚拟机发送数据。
+
+### WebServer（HTTP 服务器）
+
+TinyOS 内置一个简单的 HTTP WebServer，基于 TCP 协议实现。
+
+**启动：**
+```
+TinyOS> webserver
+WebServer started on port 80.
+Connect to http://localhost:8088/ (QEMU hostfwd)
+```
+
+**浏览器访问：**
+
+打开宿主机浏览器访问 `http://localhost:8088/`，即可看到 TinyOS 系统信息页面（内核名称、架构、运行状态）。
+
+**停止：**
+```
+TinyOS> webserver stop
+```
+
+**实现原理：**
+- HTTP 服务器运行在端口 80，通过 QEMU `hostfwd=tcp::8088-:80` 转发到宿主机 8088 端口
+- 使用内核 TCP 协议栈处理 HTTP 请求，无需用户态进程
+- 收到 HTTP GET 请求后，直接返回包含系统信息的 HTML 页面并关闭连接
+- 每个请求都打印调试信息到串口日志（`logs/serial.log`）

@@ -889,6 +889,137 @@ if (c == '\n' || c == '\r') {
 
 ---
 
+## 问题25：WebServer 无法访问 - QEMU 用户态网络隔离
+
+### 现象
+在 TinyOS 中启动 WebServer 后，在宿主机浏览器中直接访问 `http://10.0.2.15/` 无法连接。
+
+### 根本原因
+QEMU 的 `-netdev user`（用户态网络）创建一个隔离的虚拟网络。虚拟机内部的 IP 地址（如 10.0.2.15）只在 QEMU 内部可见，宿主机无法直接路由到该地址。
+
+### 解决
+必须通过 QEMU 的 `hostfwd` 规则进行端口转发：
+
+```
+-netdev user,id=net0,hostfwd=tcp::8088-:80,hostfwd=udp::8888-:8888
+```
+
+宿主机访问 `http://localhost:8088/` 时，QEMU 自动将 TCP 数据转发到虚拟机的 80 端口。
+
+### 反向通信
+- 宿主机 → 虚拟机：必须用 `hostfwd` 端口转发
+- 虚拟机 → 宿主机：直接访问 `10.0.2.2`（QEMU 默认网关），无需转发
+
+---
+
+## 问题26：浏览器显示 "ERR_INVALID_HTTP_RESPONSE"
+
+### 现象
+启动 WebServer 后，浏览器访问 `http://localhost:8088/` 显示：
+```
+该网页无法正常运作
+localhost 发送的响应无效。
+ERR_INVALID_HTTP_RESPONSE
+```
+
+### 根本原因
+**TCP 三次握手的 SYN-ACK 消耗了一个序列号，但握手完成后未递增 `ack_seq`。**
+
+TCP 协议规定，SYN 和 FIN 标志位各消耗一个序列号。三次握手流程：
+1. 客户端发送 SYN（seq=x）
+2. 服务端回复 SYN-ACK（seq=y, ack_seq=x+1）— 这里服务端已消耗一个 seq
+3. 客户端发送 ACK（seq=x+1, ack_seq=y+1）
+
+握手完成后，服务端的数据段的序列号应从 `y+1` 开始，而不是 `y`。
+
+在 `handle_tcp()` 函数中，进入 `ESTABLISHED` 状态时，原始代码未递增 `ack_seq`：
+
+```c
+// 错误：缺少 ack_seq++，后续数据段序列号 = y（但实际应为 y+1）
+tcp_set_state(conn, TCP_ESTABLISHED);
+
+// 修复：SYN-ACK 消耗一个序列号
+tcp_set_state(conn, TCP_ESTABLISHED);
+conn->ack_seq++;  // SYN 消耗一个序列号
+```
+
+### 为什么浏览器收到序列号错误的 HTTP 响应？
+TCP 协议栈组装 HTTP 响应时，数据段序列号从 `conn->ack_seq` 开始。由于握手后 `ack_seq` 未递增，序列号乱序到达客户端。客户端的 TCP 协议栈认为数据无效（可能视为重复数据或乱序到达），拒绝将其传递给 HTTP 解析器，最终浏览器报告 "ERR_INVALID_HTTP_RESPONSE"。
+
+### 经验教训
+> TCP 协议中 SYN 和 FIN 各消耗一个序列号，这是 TCP 可靠传输的基本规则。在实现 TCP 状态机时，必须在 SYN 或 FIN 处理后同步更新序列号/确认号，否则后续数据传输都会错位。
+
+---
+
+## 问题27：SYN-ACK 无法发送 - ARP 表未自动学习
+
+### 现象
+WebServer 监听端口 80，客户端发送 SYN 后，服务端不回复 SYN-ACK。串口日志看不到任何 TCP 包的回复记录。
+
+### 根本原因
+**收到 IP 包时未将源 MAC 地址和源 IP 地址加入 ARP 缓存表。**
+
+`net_recv_handler()` 处理以太网帧时，只对 ARP 包调用了 `arp_table_add()`，而处理 IP 包时没有：
+
+```c
+void net_recv_handler(eth_header_t *eth, uint16_t len) {
+    if (eth->type == ETH_TYPE_ARP) {
+        arp_table_add(...);  // ✅ ARP 包学习了对方 MAC
+    } else if (eth->type == ETH_TYPE_IP) {
+        // ❌ IP 包没有学习源 MAC！
+        // 导致 tcp_send_packet() 调用 arp_resolve() 时查不到 MAC
+    }
+}
+```
+
+当 WebServer 处理 TCP SYN 时：
+1. `tcp_send_packet()` 需要发送 SYN-ACK
+2. 调用 `arp_resolve(target_ip)` 查找客户端的 MAC 地址
+3. ARP 表为空 → 查找失败 → 数据包被丢弃，SYN-ACK 永远发不出去
+
+### 解决
+在 `net_recv_handler()` 处理 IP 包时添加 ARP 表学习：
+
+```c
+if (eth->type == ETH_TYPE_IP) {
+    ip_header_t *ip_hdr = (ip_header_t *)(eth + 1);
+    arp_table_add(ip_hdr->src_ip, eth->src_mac);  // ✅ 自动学习
+    // ... 继续处理 IP 包
+}
+```
+
+### 经验教训
+> 收到任何 IP 包时都应自动学习源 MAC/IP 映射到 ARP 表。这是 TCP/IP 协议栈的常见优化，避免每次发送回复前都需要额外的 ARP 请求-回复交互。
+
+---
+
+## 问题28：端口 8080 被占用
+
+### 现象
+启动 QEMU 时报告端口绑定失败，或浏览器访问无响应。
+
+### 原因
+8080 端口是常见开发端口，容易被本地其他服务（如 Tomcat、Jenkins、代理工具等）占用。
+
+### 解决
+将 QEMU 端口转发从 8080 改为 8088：
+
+```
+# 修改前
+hostfwd=tcp::8080-:80
+
+# 修改后
+hostfwd=tcp::8088-:80
+```
+
+在 TinyOS Shell 中使用 `webserver` 命令启动后，通过 `http://localhost:8088/` 访问。
+
+### 涉及文件
+- `Makefile`: QEMU 的 `hostfwd` 参数
+- `kernel/webserver.c`: WebServer 启动提示信息中的端口号
+
+---
+
 ## 搁置问题：退出 GUI 后键盘可能无响应
 
 ### 现象

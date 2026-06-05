@@ -61,6 +61,7 @@ typedef struct {
 
 #define IP_PROTO_UDP    17
 #define IP_PROTO_ICMP   1
+#define IP_PROTO_TCP    6
 
 /* UDP header */
 typedef struct {
@@ -96,6 +97,53 @@ typedef void (*udp_recv_callback_t)(uint32_t src_ip, uint16_t src_port,
                                      uint16_t dst_port,
                                      const uint8_t* data, uint16_t len);
 
+/* ---- TCP ---- */
+
+/* TCP header */
+typedef struct {
+    uint16_t src_port;
+    uint16_t dst_port;
+    uint32_t seq_num;
+    uint32_t ack_num;
+    uint8_t  data_offset;   /* High 4 bits: header length in 32-bit words */
+    uint8_t  flags;
+    uint16_t window_size;
+    uint16_t checksum;
+    uint16_t urgent_ptr;
+} __attribute__((packed)) tcp_header_t;
+
+/* TCP flags */
+#define TCP_FIN   0x01
+#define TCP_SYN   0x02
+#define TCP_RST   0x04
+#define TCP_PSH   0x08
+#define TCP_ACK   0x10
+#define TCP_URG   0x20
+
+/* TCP connection states */
+#define TCP_LISTEN      0
+#define TCP_SYN_RCVD    1
+#define TCP_ESTABLISHED 2
+#define TCP_CLOSE_WAIT  3
+#define TCP_LAST_ACK    4
+#define TCP_CLOSED      5
+
+/* TCP connection entry */
+typedef struct {
+    int      used;
+    uint32_t ip;
+    uint16_t port;
+    uint32_t seq;           /* Next expected sequence number from peer */
+    uint32_t ack_seq;       /* Next ack number we will send */
+    int      state;
+} tcp_conn_t;
+
+#define TCP_CONN_MAX 4
+
+/* TCP receive callback for established connections */
+typedef void (*tcp_recv_callback_t)(uint32_t src_ip, uint16_t src_port,
+                                    const uint8_t* data, uint16_t len);
+
 /* API */
 void net_init(uint32_t ip_addr, uint32_t gateway, uint32_t subnet_mask);
 void net_recv_handler(const uint8_t* frame, uint16_t len);
@@ -106,5 +154,12 @@ int net_send_icmp_echo(uint32_t dst_ip, uint16_t id, uint16_t seq);
 void net_set_udp_callback(udp_recv_callback_t cb);
 const arp_entry_t* net_arp_lookup(uint32_t ip);
 void net_get_config(uint32_t* ip, uint32_t* gateway, uint32_t* mask);
+
+/* TCP API */
+void net_tcp_listen(uint16_t port);
+void net_set_tcp_callback(tcp_recv_callback_t cb);
+int  net_tcp_send(uint32_t dst_ip, uint16_t dst_port,
+                  const void* data, uint16_t len, uint8_t flags);
+int  net_tcp_close(uint32_t dst_ip, uint16_t dst_port);
 
 #endif /* NET_H */

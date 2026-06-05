@@ -32,6 +32,7 @@ BUILD = build
 C_SRCS    = kernel/kernel.c kernel/shell.c kernel/except.c kernel/gdt.c \
             kernel/tss.c kernel/pmm.c kernel/paging.c kernel/mm.c kernel/loader.c \
             kernel/scheduler.c kernel/fat16.c kernel/net.c kernel/wm.c \
+            kernel/webserver.c \
             drivers/vga.c drivers/keyboard.c drivers/timer.c drivers/interrupts.c \
             drivers/ata.c drivers/pci.c drivers/ne2000.c drivers/serial.c \
             drivers/vbe.c drivers/framebuf.c drivers/mouse.c drivers/builtin_font.c \
@@ -52,7 +53,7 @@ USER_ELFS  = build/user/gfxsnake.elf build/user/hello.elf
 # Target
 TARGET    = $(BUILD)/tinyos.bin
 
-.PHONY: all user-programs run run-debug run-serial clean rebuild disk
+.PHONY: all user-programs run run-debug run-serial run-gdb gdb clean rebuild disk
 
 # Default target: build user programs first, then kernel
 all: user-programs $(TARGET)
@@ -102,14 +103,23 @@ $(BUILD):
 
 # Run (VGA window + PS/2 keyboard, no serial redirect)
 run: $(TARGET)
-	$(QEMU) -kernel $(TARGET) -m 32 -vga std -drive file=disk.img,format=raw,if=ide -netdev user,id=net0,hostfwd=udp::8888-:8888 -device ne2k_pci,netdev=net0
+	$(QEMU) -kernel $(TARGET) -m 32 -vga std -drive file=disk.img,format=raw,if=ide -netdev user,id=net0,hostfwd=tcp::8088-:80,hostfwd=udp::8888-:8888 -device ne2k_pci,netdev=net0
 
 # Run with serial debug logging
 run-debug: $(TARGET) | logs
-	$(QEMU) -kernel $(TARGET) -m 32 -vga std -serial file:logs/serial.log -drive file=disk.img,format=raw,if=ide -netdev user,id=net0,hostfwd=udp::8888-:8888 -device ne2k_pci,netdev=net0
+	$(QEMU) -kernel $(TARGET) -m 32 -vga std -serial file:logs/serial.log -drive file=disk.img,format=raw,if=ide -netdev user,id=net0,hostfwd=tcp::8088-:80,hostfwd=udp::8888-:8888 -device ne2k_pci,netdev=net0
 
 run-serial: $(TARGET)
-	$(QEMU) -kernel $(TARGET) -m 32 -vga std -nographic -drive file=disk.img,format=raw,if=ide -netdev user,id=net0,hostfwd=udp::8888-:8888 -device ne2k_pci,netdev=net0
+	$(QEMU) -kernel $(TARGET) -m 32 -vga std -nographic -drive file=disk.img,format=raw,if=ide -netdev user,id=net0,hostfwd=tcp::8088-:80,hostfwd=udp::8888-:8888 -device ne2k_pci,netdev=net0
+
+# Run with GDB stub (wait for GDB on port 1234, CPU frozen at start)
+run-gdb: $(TARGET)
+	$(QEMU) -kernel $(TARGET) -m 32 -vga std -serial file:logs/serial.log -drive file=disk.img,format=raw,if=ide -netdev user,id=net0,hostfwd=tcp::8088-:80,hostfwd=udp::8888-:8888 -device ne2k_pci,netdev=net0 -s -S
+
+# Launch GDB and connect to QEMU
+GDB = tools/i686-elf-gdb.exe
+gdb: $(TARGET)
+	$(GDB) -x scripts/debug.gdb
 
 # Ensure logs directory exists
 logs:

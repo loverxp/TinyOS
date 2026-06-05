@@ -298,6 +298,245 @@ static void handle_udp(const uint8_t* data, uint16_t len, uint32_t src_ip) {
     }
 }
 
+/* ---- TCP ---- */
+
+static tcp_conn_t tcp_conns[TCP_CONN_MAX];
+static uint16_t tcp_listen_port = 0;
+static tcp_recv_callback_t tcp_callback = NULL;
+static uint32_t tcp_my_seq = 10000;  /* Initial sequence number */
+
+/* TCP pseudo header for checksum */
+typedef struct {
+    uint32_t src_ip;
+    uint32_t dst_ip;
+    uint8_t  zero;
+    uint8_t  protocol;  /* 6 for TCP */
+    uint16_t tcp_length;
+} __attribute__((packed)) tcp_pseudo_header_t;
+
+static uint16_t tcp_checksum(const void* tcp_seg, uint16_t tcp_len,
+                              uint32_t src_ip, uint32_t dst_ip) {
+    uint8_t buf[1600];
+    tcp_pseudo_header_t* pseudo = (tcp_pseudo_header_t*)buf;
+    pseudo->src_ip = src_ip;
+    pseudo->dst_ip = dst_ip;
+    pseudo->zero = 0;
+    pseudo->protocol = IP_PROTO_TCP;
+    pseudo->tcp_length = htons(tcp_len);
+    memcpy(buf + sizeof(tcp_pseudo_header_t), tcp_seg, tcp_len);
+    return ip_checksum(buf, sizeof(tcp_pseudo_header_t) + tcp_len);
+}
+
+static tcp_conn_t* tcp_find_conn(uint32_t ip, uint16_t port) {
+    for (int i = 0; i < TCP_CONN_MAX; i++) {
+        if (tcp_conns[i].used && tcp_conns[i].ip == ip && tcp_conns[i].port == port)
+            return &tcp_conns[i];
+    }
+    return NULL;
+}
+
+static tcp_conn_t* tcp_new_conn(uint32_t ip, uint16_t port) {
+    for (int i = 0; i < TCP_CONN_MAX; i++) {
+        if (!tcp_conns[i].used) {
+            tcp_conns[i].used = 1;
+            tcp_conns[i].ip = ip;
+            tcp_conns[i].port = port;
+            tcp_conns[i].state = TCP_LISTEN;
+            return &tcp_conns[i];
+        }
+    }
+    return NULL;
+}
+
+static void tcp_free_conn(tcp_conn_t* conn) {
+    conn->used = 0;
+    conn->state = TCP_CLOSED;
+}
+
+static void tcp_send_segment(tcp_conn_t* conn, uint32_t dst_ip, uint16_t dst_port,
+                              uint32_t seq, uint32_t ack, uint8_t flags,
+                              const void* data, uint16_t data_len) {
+    /* Resolve MAC */
+    uint32_t route_ip = resolve_dst(dst_ip);
+    const arp_entry_t* arp = net_arp_lookup(route_ip);
+    if (!arp) {
+        net_send_arp_request(route_ip);
+        serial_printf("[TCP] ARP pending for %u.%u.%u.%u\n",
+                      route_ip & 0xFF, (route_ip >> 8) & 0xFF,
+                      (route_ip >> 16) & 0xFF, (route_ip >> 24) & 0xFF);
+        return;
+    }
+
+    build_eth_header(arp->mac, ETHERTYPE_IP);
+
+    /* Build TCP header */
+    uint8_t* tcp_start = tx_frame + sizeof(eth_header_t) + 20;
+    tcp_header_t* tcp = (tcp_header_t*)tcp_start;
+    tcp->src_port = htons(tcp_listen_port);
+    tcp->dst_port = htons(dst_port);
+    tcp->seq_num = htonl(seq);
+    tcp->ack_num = htonl(ack);
+    tcp->data_offset = (5 << 4) | 0;  /* 20-byte TCP header */
+    tcp->flags = flags;
+    tcp->window_size = htons(4096);
+    tcp->urgent_ptr = 0;
+
+    uint16_t tcp_len = sizeof(tcp_header_t) + data_len;
+    memcpy(tcp_start + sizeof(tcp_header_t), data, data_len);
+
+    /* Calculate TCP checksum */
+    tcp->checksum = 0;
+    uint32_t my_ip_val;
+    net_get_config(&my_ip_val, NULL, NULL);
+    tcp->checksum = tcp_checksum(tcp_start, tcp_len, my_ip_val, dst_ip);
+
+    /* Build IP header */
+    ip_header_t* ip = (ip_header_t*)(tx_frame + sizeof(eth_header_t));
+    build_ip_header(ip, dst_ip, IP_PROTO_TCP, tcp_len);
+
+    uint16_t frame_len = sizeof(eth_header_t) + 20 + tcp_len;
+    ne2000_send(tx_frame, frame_len);
+}
+
+void net_tcp_listen(uint16_t port) {
+    tcp_listen_port = port;
+    memset(tcp_conns, 0, sizeof(tcp_conns));
+    tcp_my_seq = 10000;
+    serial_printf("[TCP] Listening on port %u\n", port);
+}
+
+void net_set_tcp_callback(tcp_recv_callback_t cb) {
+    tcp_callback = cb;
+}
+
+int net_tcp_send(uint32_t dst_ip, uint16_t dst_port,
+                  const void* data, uint16_t len, uint8_t flags) {
+    tcp_conn_t* conn = tcp_find_conn(dst_ip, dst_port);
+    if (!conn) return -1;
+
+    tcp_send_segment(conn, dst_ip, dst_port,
+                     conn->ack_seq, conn->seq,
+                     flags | TCP_ACK, data, len);
+
+    if (flags & TCP_SYN) {
+        conn->seq = conn->ack_seq;  /* seq set correctly */
+    }
+    if (data || (flags & TCP_FIN)) {
+        conn->ack_seq += len;
+        if (flags & TCP_FIN) conn->ack_seq++;
+    }
+
+    return 0;
+}
+
+int net_tcp_close(uint32_t dst_ip, uint16_t dst_port) {
+    tcp_conn_t* conn = tcp_find_conn(dst_ip, dst_port);
+    if (!conn) return -1;
+
+    serial_printf("[TCP] Closing connection %u.%u.%u.%u:%u\n",
+                  dst_ip & 0xFF, (dst_ip >> 8) & 0xFF,
+                  (dst_ip >> 16) & 0xFF, (dst_ip >> 24) & 0xFF,
+                  dst_port);
+
+    /* Send FIN */
+    tcp_send_segment(conn, dst_ip, dst_port,
+                     conn->ack_seq, conn->seq,
+                     TCP_FIN | TCP_ACK, NULL, 0);
+
+    conn->ack_seq++;
+    conn->state = TCP_LAST_ACK;
+    return 0;
+}
+
+static void handle_tcp(const uint8_t* data, uint16_t len, uint32_t src_ip) {
+    if (len < sizeof(tcp_header_t)) return;
+
+    const tcp_header_t* tcp = (const tcp_header_t*)data;
+    uint16_t src_port = ntohs(tcp->src_port);
+    uint16_t dst_port = ntohs(tcp->dst_port);
+    uint8_t  flags = tcp->flags;
+    uint32_t seq = ntohl(tcp->seq_num);
+    uint32_t ack = ntohl(tcp->ack_num);
+    uint8_t  header_len = ((tcp->data_offset >> 4) & 0x0F) * 4;
+    uint16_t payload_len = (len >= header_len) ? len - header_len : 0;
+    const uint8_t* payload = data + header_len;
+
+    /* Only handle packets to our listening port */
+    if (dst_port != tcp_listen_port) return;
+
+    serial_printf("[TCP] recv: %u.%u.%u.%u:%u -> port %u flags=%s%s%s%s seq=%u ack=%u len=%u\n",
+                  src_ip & 0xFF, (src_ip >> 8) & 0xFF,
+                  (src_ip >> 16) & 0xFF, (src_ip >> 24) & 0xFF,
+                  src_port, dst_port,
+                  (flags & TCP_SYN) ? "SYN " : "",
+                  (flags & TCP_ACK) ? "ACK " : "",
+                  (flags & TCP_PSH) ? "PSH " : "",
+                  (flags & TCP_FIN) ? "FIN " : "",
+                  seq, ack, payload_len);
+
+    /* Find or create connection */
+    tcp_conn_t* conn = tcp_find_conn(src_ip, src_port);
+
+    if (flags & TCP_SYN) {
+        /* New connection request */
+        if (!conn) {
+            conn = tcp_new_conn(src_ip, src_port);
+            if (!conn) {
+                serial_printf("[TCP] Connection table full!\n");
+                return;
+            }
+        }
+        conn->seq = seq + 1;          /* Next expected seq */
+        conn->ack_seq = tcp_my_seq++;  /* Our initial seq for this connection */
+
+        serial_printf("[TCP] SYN received, sending SYN-ACK (my_seq=%u)\n", conn->ack_seq);
+        tcp_send_segment(conn, src_ip, src_port,
+                         conn->ack_seq, conn->seq,
+                         TCP_SYN | TCP_ACK, NULL, 0);
+        conn->state = TCP_SYN_RCVD;
+        return;
+    }
+
+    if (!conn) return;
+
+    if (flags & TCP_ACK && conn->state == TCP_SYN_RCVD) {
+        /* Handshake complete */
+        conn->state = TCP_ESTABLISHED;
+        conn->ack_seq++;  /* SYN-ACK consumed one sequence number */
+        serial_printf("[TCP] Connection established: %u.%u.%u.%u:%u\n",
+                      src_ip & 0xFF, (src_ip >> 8) & 0xFF,
+                      (src_ip >> 16) & 0xFF, (src_ip >> 24) & 0xFF,
+                      src_port);
+        return;
+    }
+
+    if (flags & TCP_FIN) {
+        serial_printf("[TCP] FIN received\n");
+        conn->seq = seq + 1;
+        tcp_send_segment(conn, src_ip, src_port,
+                         conn->ack_seq, conn->seq,
+                         TCP_ACK, NULL, 0);
+        conn->state = TCP_CLOSE_WAIT;
+        tcp_free_conn(conn);
+        return;
+    }
+
+    if (payload_len > 0 && conn->state == TCP_ESTABLISHED) {
+        conn->seq = seq + payload_len;
+
+        /* Send ACK for received data */
+        serial_printf("[TCP] ACKing %u bytes (next_seq=%u)\n", payload_len, conn->seq);
+        tcp_send_segment(conn, src_ip, src_port,
+                         conn->ack_seq, conn->seq,
+                         TCP_ACK, NULL, 0);
+
+        /* Call the callback */
+        if (tcp_callback) {
+            tcp_callback(src_ip, src_port, payload, payload_len);
+        }
+    }
+}
+
 /* ---- IP packet dispatch ---- */
 
 static void handle_ip(const uint8_t* data, uint16_t len) {
@@ -323,6 +562,9 @@ static void handle_ip(const uint8_t* data, uint16_t len) {
             break;
         case IP_PROTO_UDP:
             handle_udp(payload, payload_len, ip->src_ip);
+            break;
+        case IP_PROTO_TCP:
+            handle_tcp(payload, payload_len, ip->src_ip);
             break;
     }
 }
@@ -356,6 +598,13 @@ void net_recv_handler(const uint8_t* frame, uint16_t len) {
             break;
         case ETHERTYPE_IP:
             serial_printf("[NET] recv: -> IP handler\n");
+            /* Add source MAC + IP to ARP table so we can reply immediately
+             * without needing a separate ARP exchange. This is critical for
+             * TCP: a SYN-ACK must be sent back, and it needs the peer's MAC. */
+            if (payload_len >= 20) {
+                const ip_header_t* ip_hdr = (const ip_header_t*)payload;
+                arp_table_add(ip_hdr->src_ip, eth->src_mac);
+            }
             handle_ip(payload, payload_len);
             break;
         default:
