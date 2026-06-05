@@ -299,6 +299,31 @@ qemu-system-i386 -kernel build/tinyos.bin -d int,cpu_reset
 
 ---
 
+## 问题11：启用分页后用户态程序无法运行
+
+### 现象
+启用分页后 `runuser` 命令执行用户程序时崩溃或无响应。
+
+### 原因
+页表未正确映射用户程序地址 `0x400000`。分页初始化时只 identity map 了前 8MB 物理内存，如果页表覆盖范围不足，用户程序地址无法访问。
+
+### 解决
+确保页表 identity map 覆盖用户程序地址：
+```c
+// 映射 0~8MB（包含 0x400000）
+for (int t = 0; t < 2; t++) {  // 2 个页表 = 8MB
+    page_tables[t] = (page_table_entry_t*)pmm_alloc_page();
+    uint32_t base = t * 0x400000;
+    for (int i = 0; i < PT_ENTRIES; i++) {
+        // 设置 present=1, rw=1, user=1
+        // 物理地址 = base + i * 4096
+    }
+    // 设置页目录项
+}
+```
+
+---
+
 ## 问题12：贪吃蛇游戏键盘无响应
 
 ### 现象
@@ -368,7 +393,7 @@ IRQ1 触发
 
 `shell_char_callback` 处理一个字符后在微秒级返回。IRQ 处理链正常完成，
 `irq_handler` 末尾的 `pic_send_eoi()` 被正常调用。PIC 清除 IRQ1 的
-“In-Service”位，下次按键可以正常触发中断。
+"In-Service"位，下次按键可以正常触发中断。
 
 **贪吃蛇游戏：**
 ```
@@ -392,31 +417,6 @@ PIC 始终将 IRQ1 标记为 "In-Service"——**无限期阻塞所有后续键�
 >    EOI 已经发送，否则 PIC 会阻塞该 IRQ 的后续中断。
 > 2. 正常 Shell 命令不会有此问题，因为回调立即返回，EOI 能正常发送。
 >    只有**劫持中断处理流程**的长驻逻辑才需要手动发送 EOI。
-
----
-
-## 问题11：启用分页后用户态程序无法运行
-
-### 现象
-启用分页后 `runuser` 命令执行用户程序时崩溃或无响应。
-
-### 原因
-页表未正确映射用户程序地址 `0x400000`。分页初始化时只 identity map 了前 8MB 物理内存，如果页表覆盖范围不足，用户程序地址无法访问。
-
-### 解决
-确保页表 identity map 覆盖用户程序地址：
-```c
-// 映射 0~8MB（包含 0x400000）
-for (int t = 0; t < 2; t++) {  // 2 个页表 = 8MB
-    page_tables[t] = (page_table_entry_t*)pmm_alloc_page();
-    uint32_t base = t * 0x400000;
-    for (int i = 0; i < PT_ENTRIES; i++) {
-        // 设置 present=1, rw=1, user=1
-        // 物理地址 = base + i * 4096
-    }
-    // 设置页目录项
-}
-```
 
 ---
 
@@ -544,15 +544,34 @@ for (int i = 0; i < 16; i++) {
 
 ---
 
-## 已知问题：退出 gfxsnake 后无法再次进入
+## 问题15：用户程序 hello 输出被清除
 
 ### 现象
-第一次运行 `gfxsnake` 正常，退出后再次输入 `gfxsnake` 输出"用户栈分配失败"（`pmm_alloc_page()` 返回 NULL）。
+运行 `hello` 命令后，用户程序输出的 "Hello from user mode!" 和 "Running in Ring 3 via libc" 不可见，只显示 "Return to kernel mode" 或 "Hello program finished, back in kernel mode."
 
-### 状态
-待排查。可能原因：
-- 用户程序栈页面未正确释放（`pmm_free_page` 后 PMM 位图状态不一致）
-- 物理内存管理器的位图分配/释放逻辑问题
+### 根本原因
+**`vga_set_mode03h()` 的清屏逻辑破坏了 VGA 文本缓冲区内容。**
+
+hello 程序通过 syscall 7 调用 `vga_writestring()` 将输出写入 VGA 文本缓冲区（0xB8000）。当 hello 调用 `exit(0)`（syscall 0）时，内核的 syscall 处理函数调用 `vga_set_mode03h()` 恢复文本模式，该函数末尾有清屏代码（循环写入 0x0720 覆盖 80×25 个字符），直接抹掉了 hello 的所有输出。
+
+随后 `vga_writestring("*** Return to kernel mode ***")` 写入的"Return"消息虽然可见，但 hello 的原始输出已不复存在。
+
+### 解决
+1. **移除 `vga_set_mode03h()` 中的清屏操作**：将清屏的责任交给调用者。`vga_set_mode03h()` 只负责 VGA 寄存器恢复和字模恢复，不清除文本缓冲区。
+2. **简化 `loader.c` 中的 `run_hello_user()`**：不再调用 `vga_initialize()`（其内部会清屏），而是仅设置光标位置和颜色，保留 VGA 缓冲区的已有内容。
+
+### 涉及文件
+- `drivers/interrupts.c`: `vga_set_mode03h()` — 移除末尾的清屏代码
+- `kernel/loader.c`: `run_hello_user()` — 用 `vga_set_cursor()` + `vga_set_color()` 替代 `vga_initialize()`
+
+### 验证
+运行 `hello` 后能看到完整的输出链：
+```
+Hello from user mode!
+Running in Ring 3 via libc
+*** Return to kernel mode ***
+Hello program finished, back in kernel mode.
+```
 
 ---
 
@@ -647,34 +666,136 @@ outb(0xA1, 0xFF);
 
 ---
 
-## 问题15：用户程序 hello 输出被清除
+## 问题19：NE2000 PCI I/O Space 未启用（信号被静默丢弃）
 
 ### 现象
-运行 `hello` 命令后，用户程序输出的 "Hello from user mode!" 和 "Running in Ring 3 via libc" 不可见，只显示 "Return to kernel mode" 或 "Hello program finished, back in kernel mode."
+NE2000 初始化完成后发送数据包无任何回应，QEMU 侧完全收不到以太网帧。
+串口日志显示 NE2000 内部寄存器写入正常，但数据实际未到达 PCI 总线。
 
 ### 根本原因
-**`vga_set_mode03h()` 的清屏逻辑破坏了 VGA 文本缓冲区内容。**
+**PCI Command Register 的 I/O Space Enable 位（bit 0）未置位。**
 
-hello 程序通过 syscall 7 调用 `vga_writestring()` 将输出写入 VGA 文本缓冲区（0xB8000）。当 hello 调用 `exit(0)`（syscall 0）时，内核的 syscall 处理函数调用 `vga_set_mode03h()` 恢复文本模式，该函数末尾有清屏代码（循环写入 0x0720 覆盖 80×25 个字符），直接抹掉了 hello 的所有输出。
-
-随后 `vga_writestring("*** Return to kernel mode ***")` 写入的"Return"消息虽然可见，但 hello 的原始输出已不复存在。
+QEMU 模拟的 NE2000 在 PCI 配置空间复位后，I/O 地址解码默认关闭。
+NE2000 驱动仅读取了 BAR0 获取 I/O 基址，但没有写 Command Register 启用 I/O 空间。
+结果：所有对 NE2000 I/O 端口的 `outb`/`inb` 写入 NIC 内部寄存器成功（因为 QEMU
+NE2000 的 I/O 端口映射到 PCI 配置空间的 BAR 区域，访问不报错），但以太网帧
+从未真正被 QEMU 的网络后端处理——信号被 PCI 桥静默丢弃。
 
 ### 解决
-1. **移除 `vga_set_mode03h()` 中的清屏操作**：将清屏的责任交给调用者。`vga_set_mode03h()` 只负责 VGA 寄存器恢复和字模恢复，不清除文本缓冲区。
-2. **简化 `loader.c` 中的 `run_hello_user()`**：不再调用 `vga_initialize()`（其内部会清屏），而是仅设置光标位置和颜色，保留 VGA 缓冲区的已有内容。
-
-### 涉及文件
-- `drivers/interrupts.c`: `vga_set_mode03h()` — 移除末尾的清屏代码
-- `kernel/loader.c`: `run_hello_user()` — 用 `vga_set_cursor()` + `vga_set_color()` 替代 `vga_initialize()`
+在读取 BAR0 后，显式设置 PCI Command Register bit 0：
+```c
+uint32_t pci_cmd = pci_read_config(bus, dev, func, 0x04);
+pci_cmd |= 0x00000001;  /* Set bit 0: I/O Space Enable */
+pci_write_config(bus, dev, func, 0x04, pci_cmd);
+```
 
 ### 验证
-运行 `hello` 后能看到完整的输出链：
+设置后串口日志应显示：
 ```
-Hello from user mode!
-Running in Ring 3 via libc
-*** Return to kernel mode ***
-Hello program finished, back in kernel mode.
+[NE2K] PCI Command Register after = 0x00000001 (bit0=1 means I/O enabled)
 ```
+此后数据包正常收发。
+
+### 经验教训
+> PCI 设备的 I/O 和内存地址解码默认关闭，访问 BAR 之前必须先设置 Command Register。
+> 不同 PCI 设备行为不同——QEMU NE2000 在未启用 I/O 空间时仍可读写内部寄存器
+>（因为 QEMU 的 PCI 层不会阻止对 BAR 范围内端口的访问），但数据不会真正发送出去。
+> 这是一个"静默失败"的典型陷阱。
+
+---
+
+## 问题20：NE2000 接收环形缓冲区处理错误
+
+### 现象
+NE2000 初始化正常，MAC 地址正确，IRQ 11 触发正常，但收到的数据包内容
+为乱码或无法解析，ARP 回复到达后内核无法识别。
+
+### 根本原因
+**三处逻辑错误叠加导致接收完全失效：**
+
+#### 1. 包起始地址错误（BNDRY vs BNDRY+1）
+NE2000 的接收环形缓冲区的约定：BNDRY 寄存器指向**最后一个已读的页面**，
+下一个包从 **BNDRY + 1 页面**开始。原始代码直接从 BNDRY 页面读取包头，
+读到的 4 字节是上一个包的末尾数据，而非当前包的 RSR/NextPage/Length。
+
+```c
+// 错误：从 BNDRY 页读取
+uint16_t hdr_addr = (uint16_t)bnry * NE2K_PAGE_SIZE;
+
+// 正确：从 BNDRY + 1 页读取
+uint8_t page = bnry + 1;
+uint16_t hdr_addr = (uint16_t)page * NE2K_PAGE_SIZE;
+```
+
+#### 2. 16-bit DMA 模式下的头部解析错误
+DCR 配置为 `0x49`（word-wide DMA, little-endian）。在 16-bit 模式下，
+NIC 内存的每个 16-bit word 传输一次。MAC 地址在 NIC 内存中也是按 word
+存储的（每个字节占一个 word 的低 8 位）。对于接收头部的 4 个逻辑字节
+（RSR, NextPage, LengthLo, LengthHi），它们在 16-bit DMA 读取时占 2 个 word：
+- Word 0 = [NextPage | RSR]（低字节是 RSR，高字节是 NextPage）
+- Word 1 = [LengthHi | LengthLo]
+
+原始代码错误地读取了 8 字节（4 个 word），且没有正确处理 word 到字节的映射。
+修正后直接用 `ne2k_rx_header_t` 结构体读取 4 字节（2 个 word），
+`ne2k_dma_read` 已针对 16-bit 模式实现正确的字节序转换。
+
+#### 3. 包长度计算和 BNDRY 更新错误
+NE2000 报告的包长度包含 4 字节头部，读取数据时需要减去 4。
+而且 BNDRY 应更新为 `next_page - 1`（标记下一页之前的所有页面为已读），
+而非 `next_page - 1` 的另一种错误计算。
+
+```c
+// 长度计算：减去 4 字节头部
+uint16_t data_len = hdr.length - 4;
+
+// BNDRY 更新：next_page - 1
+bnry = hdr.next_page - 1;
+if (bnry < NE2K_RX_START) bnry = NE2K_RX_STOP - 1;
+ne2k_out(NE2K_BNDRY, bnry);
+```
+
+### 验证
+修复后串口日志显示正确的包头解析：
+```
+[NE2K]   RX page=0x47: rsr=0x01 next=0x48 pkt_len=64
+[NE2K]   Delivering packet: data_len=60
+```
+
+### 涉及文件
+- `drivers/ne2000.c`: `ne2k_process_rx()` 全部重写
+
+---
+
+## 问题21：NE2000 发送后无回复（ARP 轮询缺失）
+
+### 现象
+ARP 请求已正确发送（QEMU 侧可抓到），但 TinyOS 不等待回复就直接放弃。
+
+### 根本原因
+原始 `ping` 命令在 `net_send_icmp_echo()` 返回 -1（ARP 表未命中）后，
+仅打印 "ARP pending, try again..."，要求用户手动重新执行命令。
+没有自动轮询接收环形缓冲区来检查 ARP 回复是否到达。
+
+### 解决
+在 Shell 的 ping/send 命令中添加 ARP 自动轮询逻辑：
+```c
+if (ret < 0) {
+    uint32_t start = timer_get_ticks();
+    while (timer_get_ticks() - start < 10) {  /* ~200ms at 50Hz */
+        ne2000_poll_recv();     /* 轮询接收缓冲区 */
+        ret = net_send_icmp_echo(target_ip, 1, 1);
+        if (ret >= 0) break;    /* ARP 解析成功 */
+    }
+}
+```
+
+同时新增 `ne2000_poll_recv()` 函数，在无需 IRQ 触发的情况下
+直接检查 ISR 的 PRX 位并处理接收环形缓冲区中的数据包。
+
+### 涉及文件
+- `drivers/ne2000.c`: 新增 `ne2000_poll_recv()`
+- `include/ne2000.h`: 添加函数声明
+- `kernel/shell.c`: ping/send 命令添加 ARP 轮询等待
 
 ---
 
