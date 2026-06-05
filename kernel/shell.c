@@ -17,6 +17,11 @@
 #include "../include/ne2000.h"
 #include "../include/net.h"
 #include "../include/serial.h"
+#include "../include/framebuf.h"
+#include "../include/window.h"
+#include "../include/mouse.h"
+#include "../include/vbe.h"
+#include "../include/builtin_font.h"
 
 #define LINE_BUF_SIZE 256
 
@@ -405,6 +410,139 @@ static void cmd_schedtest(const char* args) {
     printf("Tasks created. They will auto-stop after %u seconds.\n", duration);
 }
 
+// ── GUI command ──────────────────────────────────────────────────────
+// Start VBE graphics mode GUI with window manager.
+// Press Escape to exit back to shell.
+
+extern void vga_set_mode03h(void);
+extern void mouse_handler(void);
+
+static volatile int gui_running = 0;
+
+static void gui_raw_cb(uint8_t scancode, uint8_t extended) {
+    (void)extended;
+    if (scancode == 0x01) {  // Escape key press
+        gui_running = 0;
+    }
+}
+
+// Demo window draw callback for system info
+static void wm_demo_info_draw(window_t* win) {
+    const uint8_t* font = builtin_font_get();
+
+    uint32_t fg = RGB(0x00, 0x00, 0x00);
+    uint32_t bg = WM_COLOR_CLIENT_BG;
+    int x = win->x + 8;
+    int y = win->y + 8;
+    int lh = 18;
+
+    uint32_t secs = timer_get_ticks() / 50;
+    uint32_t heap_used = kmalloc_get_used();
+    uint32_t heap_total = kmalloc_get_total();
+    uint32_t mem_free_mb = pmm_get_free_pages() * 4 / 1024;
+
+    char buf[64];
+    fb_drawstring(x, y, "TinyOS v0.1 - System Information", RGB(0x00, 0x00, 0x80), bg, font);
+    y += lh * 2;
+
+    sprintf(buf, "Uptime: %u s", secs);
+    fb_drawstring(x, y, buf, fg, bg, font); y += lh;
+
+    sprintf(buf, "Heap: %u KB / %u KB", heap_used / 1024, heap_total / 1024);
+    fb_drawstring(x, y, buf, fg, bg, font); y += lh;
+
+    sprintf(buf, "Free memory: %u MB", mem_free_mb);
+    fb_drawstring(x, y, buf, fg, bg, font); y += lh;
+
+    sprintf(buf, "Resolution: %dx%d %dbpp", fb.width, fb.height, fb.bpp);
+    fb_drawstring(x, y, buf, fg, bg, font); y += lh;
+
+    fb_drawstring(x, y, "---", fg, bg, font); y += lh;
+
+    fb_drawstring(x, y, "Click & drag title bar to move window", RGB(0x80, 0x80, 0x80), bg, font); y += lh;
+    fb_drawstring(x, y, "Click X to close", RGB(0x80, 0x80, 0x80), bg, font);
+}
+
+// Mouse event wrapper — forwards mouse events to WM
+static void gui_mouse_cb(int x, int y, uint8_t buttons) {
+    wm_handle_mouse(x, y, buttons);
+}
+
+static void cmd_gui(void) {
+    // cmd_gui is called from the keyboard IRQ1 handler (shell_char_callback → shell_handle_command).
+    // Send EOI for IRQ1 so PIC allows new keyboard interrupts during GUI operation.
+    outb(0x20, 0x20);
+
+    /* Register keyboard raw callback (Escape to exit) and disable shell input */
+    gui_running = 1;
+    keyboard_register_raw_callback(gui_raw_cb);
+    keyboard_register_char_callback(NULL);
+
+    /* Initialize framebuffer (VBE graphics mode 800x600x32) */
+    if (fb_init(800, 600, 32) != 0) {
+        printf("Failed to initialize framebuffer (no VBE support?)\n");
+        keyboard_register_raw_callback(NULL);
+        keyboard_register_char_callback(shell_char_callback);
+        gui_running = 0;
+        return;
+    }
+
+    /* Init PS/2 mouse (IRQ 12) */
+    mouse_init();
+    mouse_register_callback(gui_mouse_cb);
+    register_interrupt_handler(44, mouse_handler);
+    pic_unmask_irq(12);
+
+    /* Init window manager */
+    wm_init();
+
+    /* Create system info demo window */
+    window_t* win = wm_create_window(50, 50, 500, 280,
+        "TinyOS System Info", wm_demo_info_draw, NULL);
+    if (win) {
+        printf("[OK] Demo window created\n");
+    }
+
+    /* Re-enable interrupts before entering the rendering loop */
+    enable_interrupts();
+
+    /* Initial draw */
+    wm_redraw();
+    fb_flip();
+    wm_seed_cursor();
+
+    /* GUI rendering loop */
+    while (gui_running) {
+        if (wm_redraw_needed()) {
+            wm_redraw();
+            fb_flip();
+            wm_seed_cursor();
+        } else if (wm_cursor_moved()) {
+            wm_update_cursor();
+        }
+        asm volatile("hlt");
+    }
+
+    /* ── Cleanup and return to text mode ── */
+    disable_interrupts();
+
+    keyboard_register_raw_callback(NULL);
+    keyboard_register_char_callback(shell_char_callback);
+
+    /* Disable mouse IRQ and unregister callback */
+    pic_mask_irq(12);
+    mouse_register_callback(NULL);
+
+    /* Restore VGA text mode — reset everything to clean state */
+    vbe_disable();
+    vga_set_mode03h();
+    vga_initialize();
+    printf("GUI exited.\n");
+
+    enable_interrupts();
+    shell_prompt();
+}
+
 static void shell_handle_command(const char* cmd) {
     // Skip leading spaces
     while (*cmd == ' ') cmd++;
@@ -429,6 +567,7 @@ static void shell_handle_command(const char* cmd) {
             printf("  gfxsnake   - Play Snake game (pixel graphics mode)\n");
             printf("  hello      - Run hello user program\n");
             printf("  schedtest [N]- Start scheduler test for N seconds\n");
+            printf("  gui        - Start graphical UI (VBE mode)\n");
             printf("  ls         - List files on disk\n");
             printf("  cat <file> - Print file contents\n");
             printf("  diskinfo   - Show disk/filesystem info\n");
@@ -512,6 +651,8 @@ static void shell_handle_command(const char* cmd) {
         const char* args = cmd + 9;
         while (*args == ' ') args++;
         cmd_schedtest(*args ? args : NULL);
+    } else if (strcmp(cmd, "gui") == 0) {
+        cmd_gui();
     } else if (strcmp(cmd, "ls") == 0) {
         fat16_list();
     } else if (strncmp(cmd, "cat ", 4) == 0) {

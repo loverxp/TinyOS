@@ -47,9 +47,9 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 
 ## 项目结构
 - `boot/`: 启动代码
-- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, mm.c, except.c, loader.c, scheduler.c, embedded_user.asm, user.asm, switch.asm）
+- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, mm.c, except.c, loader.c, scheduler.c, wm.c, embedded_user.asm, user.asm, switch.asm）
 - `user/`: 用户程序（crt0.s, hello.c, user.ld, build.bat）
-- `drivers/`: 设备驱动（VGA、键盘、定时器、中断、GDT、串口、I/O）
+- `drivers/`: 设备驱动（VGA、键盘、定时器、中断、GDT、串口、I/O、VBE、帧缓冲、鼠标）
 - `lib/`: 库函数（字符串处理、printf/sprintf 格式化输出）
 - `include/`: 头文件
 - `tools/`: 交叉编译工具链（已下载到本地）
@@ -77,6 +77,10 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - `drivers/pci.c`: PCI 总线扫描（配置空间读写、BAR、IRQ 获取）
 - `include/net.h`: 网络协议数据结构（eth/arp/ip/icmp/udp 头）
 - `include/ne2000.h`: NE2000 寄存器定义和常量
+- `drivers/vbe.c` / `include/vbe.h`: Bochs VBE 显卡驱动（检测、高分辨率模式设置、LFB 映射）
+- `drivers/framebuf.c` / `include/framebuf.h`: 帧缓冲抽象层（putpixel、fillrect、字体渲染）
+- `drivers/mouse.c` / `include/mouse.h`: PS/2 鼠标驱动（IRQ12、数据包解析、事件回调）
+- `kernel/wm.c` / `include/window.h`: 窗口管理器（窗口创建/移动/关闭、Z-order、标题栏、鼠标事件）
 
 ## 内存布局
 - 内核加载地址: 0x100000 (1MB)
@@ -110,3 +114,12 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - **gfxsnake**: 新版 VGA Mode 13h 像素模式贪吃蛇，作为用户程序在 Ring 3 运行，使用系统调用切换视频模式和读取输入
 - **VGA 字模恢复机制**: Mode 13h (chain-4) 写入 `0xA0000` 时会破坏 VGA plane 2 的字体数据。内核在开机时调用 `vga_save_font()` 保存 4096 字节字模到缓冲区，切换回文本模式时由 `vga_set_mode03h()` 调用 `vga_restore_font()` 恢复
 - **VGA Mode 13h 初始化顺序**: Misc Output → Sequencer (复位→编程→释放) → Graphics Controller → CRTC (解锁→编程→上锁) → Attribute Controller (编程→重新使能) → DAC 调色板。顺序错误会导致黑屏或花屏
+- **图形界面 (GUI) 初始化顺序**: VBE 检测 → 模式设置 → LFB 分页映射 → 帧缓冲初始化 → PS/2 鼠标 → 窗口管理器。`fb_init()` 封装了 VBE 初始化和映射，之后调用鼠标和 WM 初始化
+- **VBE (Bochs)**: 通过 I/O 端口 0x01CE/0x01CF 编程，支持检测 (写入 0xB0C2 到 ID 寄存器并读回)、模式设置 (分辨率/bpp/使能)、LFB 物理地址从 PCI BAR 读取（QEMU std VGA: vendor=0x1234, device=0x1111）
+- **分页映射 LFB**: 帧缓冲物理地址通常在 0xE0000000，大小约 800×600×4=1.92MB，需要分配页表并通过 `paging_map_page()` 逐页映射。identity mapping 以简化实现
+- **鼠标数据包**: PS/2 鼠标在 IRQ12 上发送 3 字节包 (状态+位移 X+位移 Y)，需同步检测 (byte[0] bit 3 必须为 1)，Y 方向取反（屏幕 Y 轴向下增长）
+- **窗口管理器渲染**: `wm_redraw()` 先绘制桌面背景，然后按 Z-order 绘制所有可见窗口（先绘制底层窗口）。窗口拖拽通过标题栏鼠标按下检测 + 位移计算实现，关闭按钮在标题栏右上角
+
+## 已知问题（搁置）
+- **退出 GUI 后键盘可能无响应**: `cmd_gui` 退出流程中 `shell_char_callback` 重注册时机与键盘中断存在竞态，或 `enable_interrupts()` 前后 8042 状态不一致。临时绕过：使用串口终端
+- **首次划入 QEMU 窗口鼠标位置不正确**: PS/2 鼠标初始化后的首个数据包包含异常位移值，导致光标瞬间跳到错误位置。后续恢复正常。可免方案：忽略前 N 个数据包

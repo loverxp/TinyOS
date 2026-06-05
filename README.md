@@ -57,6 +57,7 @@
 | `snake`       | 文本模式贪吃蛇游戏               |
 | `gfxsnake`    | VGA 图形模式贪吃蛇游戏（像素模式） |
 | `gtest`       | 内核级 VGA 图形测试              |
+| `gui`         | 进入图形桌面环境（VBE 高分辨率模式，按 Esc 退出） |
 | **文件系统**    |                         |
 | `ls`          | 列出磁盘根目录文件               |
 | `cat <文件名>`   | 显示文件内容                   |
@@ -76,6 +77,12 @@
   - ✅ TSS（任务状态段）—— 特权级切换栈管理
 - ✅ VGA 文本显示 (80x25, 16色)
 - ✅ VGA 图形模式 (Mode 13h, 320×200, 256 色)
+- ✅ VBE 高分辨率图形模式 (Bochs VBE, 800×600×32)
+- ✅ 帧缓冲驱动框架 (putpixel/fillrect/font rendering)
+- ✅ 双缓冲 (backbuffer + fb_flip 消除闪屏)
+- ✅ PS/2 鼠标驱动 (IRQ12, 三字节数据包, 事件回调)
+- ✅ 窗口管理器 (动态创建/拖拽/关闭, Z-order, 标题栏)
+- ✅ GUI 桌面环境 (`gui` 命令启动, Esc 退出恢复文本模式)
 - ✅ VGA 字模保存与恢复（图形↔文本模式切换）
 - ✅ VGA 状态栏（系统运行时间、堆使用量、空闲内存）
 - ✅ 硬件光标
@@ -117,6 +124,7 @@ TinyOS/
 │   ├── scheduler.c        # 抢占式多任务调度器
 │   ├── fat16.c            # FAT16 文件系统解析器
 │   ├── net.c              # 网络协议栈 (ARP/IP/ICMP/UDP)
+│   ├── wm.c               # 窗口管理器（创建/拖拽/关闭/Z-order）
 │   ├── embedded_user.asm  # 嵌入的 gfxsnake.elf
 │   └── user.asm           # 用户态入口和切换逻辑
 ├── user/
@@ -142,7 +150,11 @@ TinyOS/
 │   ├── io.asm             # I/O 端口操作
 │   ├── ata.c              # ATA PIO 磁盘驱动
 │   ├── pci.c              # PCI 总线扫描
-│   └── ne2000.c           # NE2000 网卡驱动
+│   ├── ne2000.c           # NE2000 网卡驱动
+│   ├── vbe.c              # Bochs VBE 高分辨率显卡驱动
+│   ├── framebuf.c         # 帧缓冲抽象层（putpixel/fillrect/双缓冲）
+│   ├── mouse.c            # PS/2 鼠标驱动（IRQ12）
+│   └── serial.c           # 串口驱动（COM1 中断收发）
 ├── lib/
 │   ├── string.c           # 字符串处理
 │   └── stdio.c            # printf/sprintf 格式化输出
@@ -169,7 +181,12 @@ TinyOS/
 │   ├── fat16.h            # FAT16 文件系统
 │   ├── pci.h              # PCI 总线
 │   ├── ne2000.h           # NE2000 网卡
-│   └── net.h              # 网络协议栈
+│   ├── net.h              # 网络协议栈
+│   ├── vbe.h              # Bochs VBE 显卡
+│   ├── framebuf.h         # 帧缓冲抽象层
+│   ├── mouse.h            # PS/2 鼠标
+│   ├── serial.h           # 串口驱动
+│   └── window.h           # 窗口管理器
 ├── tools/                 # 交叉编译器
 ├── scripts/               # 构建与运行脚本
 │   ├── mkfat16.py         # FAT16 磁盘镜像生成器
@@ -215,22 +232,23 @@ kernel_main()
   1. 串口初始化（调试输出）
   2. GDT 初始化（内核段 + 用户段 + TSS）
   3. VGA 初始化（清屏、光标重置、保存字模）
-  4. PMM 初始化（从 GRUB 获取内存映射）
-  5. MM 初始化（基于 PMM 的堆分配器）
-  6. 分页初始化（identity map 前 8MB）
-  7. TSS 初始化（分配内核栈，供 Ring 3→Ring 0 使用）
-  8. IDT 初始化（异常 + IRQ + 系统调用门）
-  9. PIC 初始化（重映射，解除 IRQ 2 cascade 屏蔽）
-  10. 定时器初始化（注册 handler，unmask IRQ0）
-  11. 键盘初始化（注册 handler，unmask IRQ1）
-  12. Shell 初始化（注册键盘回调）
-  13. 启用中断（sti）
-  14. 调度器初始化（idle 任务 + 循环链表）
-  15. ATA 磁盘检测
-  16. FAT16 文件系统挂载
-  17. PCI 总线扫描
-  18. NE2000 网卡 + 网络协议栈初始化
-  19. 事件驱动主循环（halt）
+  4. VBE 检测（仅检测，不切换模式；输入 `gui` 命令后才激活）
+  5. PMM 初始化（从 GRUB 获取内存映射）
+  6. MM 初始化（基于 PMM 的堆分配器）
+  7. 分页初始化（identity map 前 8MB）
+  8. TSS 初始化（分配内核栈，供 Ring 3→Ring 0 使用）
+  9. IDT 初始化（异常 + IRQ + 系统调用门）
+  10. PIC 初始化（重映射，解除 IRQ 2 cascade 屏蔽）
+  11. 定时器初始化（注册 handler，unmask IRQ0）
+  12. 键盘初始化（注册 handler，unmask IRQ1）
+  13. Shell 初始化（注册键盘回调）
+  14. 启用中断（sti）
+  15. 调度器初始化（idle 任务 + 循环链表）
+  16. ATA 磁盘检测
+  17. FAT16 文件系统挂载
+  18. PCI 总线扫描
+  19. NE2000 网卡 + 网络协议栈初始化
+  20. 事件驱动主循环（halt）
 ```
 
 ### 用户态切换流程
@@ -258,6 +276,19 @@ run_user_task(user_main)    ← 内核态（Ring 0）
                                 ├─ 恢复内核栈
                                 └─ ret → 回到 run_user_task 调用者
 ```
+
+## 图形模式说明
+
+TinyOS 有两种图形模式：
+
+| 模式 | 标准 | 分辨率 | 色深 | 使用方式 | 适用场景 |
+|------|------|--------|------|----------|----------|
+| **VGA Mode 13h** | 标准 VGA | 320×200 | 8-bit 调色板 (256色) | `gfxsnake` / `gtest` 命令 | 像素游戏、快速绘图 |
+| **VBE GUI** | Bochs VBE | 800×600 | 32-bit 真彩色 | `gui` 命令（按 Esc 退出） | 窗口桌面、信息展示 |
+
+- `gfxsnake` 在用户态 (Ring 3) 通过系统调用 `int 0x80` 切换视频模式
+- `gui` 在内核态 (Ring 0) 通过 I/O 端口直接编程 VBE，包含鼠标和窗口管理器
+- 两者可各自独立使用，互不干扰；VBE 切换会自动恢复 VGA 文本模式
 
 ## 技术支持
 
@@ -331,6 +362,15 @@ i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-pr
 # 链接
 i686-elf-ld -T linker.ld -nostdlib -o tinyos.bin <所有 .o 文件>
 ```
+
+---
+
+## 已知问题
+
+- **退出 GUI 后键盘可能无响应**: `gui` 命令按 Esc 退出后偶尔键盘无响应。临时绕过：使用串口终端（`make run-debug` 或 `make run-serial`）
+- **首次划入 QEMU 窗口鼠标位置不正确**: PS/2 鼠标初始化后的首个数据包包含异常位移值，导致光标瞬间跳到错误位置，后续恢复正常。
+
+详见 [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) 中的详细分析。
 
 ## 许可证
 

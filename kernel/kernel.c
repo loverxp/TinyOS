@@ -17,6 +17,7 @@
 #include "../include/ne2000.h"
 #include "../include/net.h"
 #include "../include/serial.h"
+#include "../include/vbe.h"
 
 // User mode entry points (from user.asm)
 extern void run_user_task(void (*entry)(void));
@@ -44,7 +45,7 @@ void on_timer_second(void) {
     char buf[80];
     int n = sprintf(buf, "Uptime: %us  Heap: %uK/%uK  Mem: %uM free", secs, heap_used / 1024, heap_total / 1024, mem_free / 1024);
 
-    uint8_t color = vga_entry_color(VGA_COLOR_DARK_GREY, VGA_COLOR_BLACK);
+    uint8_t color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLUE);
     int row = VGA_HEIGHT - 1;
     int col;
     for (col = 0; col < n && col < VGA_WIDTH; col++) {
@@ -180,11 +181,19 @@ void kernel_main(uint32_t multiboot_info_addr) {
         printf("[!!] No NE2000 NIC (use -netdev + -device flags)\n");
     }
 
+    /* Check VBE graphics capability (GUI is NOT started automatically).
+       Type 'gui' at the shell to enter graphics mode. */
+    if (vbe_detect()) {
+        printf("[OK] VBE graphics capable (800x600x32). Type 'gui' to start GUI.\n");
+    } else {
+        printf("[!!] VBE not available — GUI not supported.\n");
+    }
+
     printf("Type 'help' for available commands.\n\n");
 
     serial_writestring("Ready, entering main loop...\n");
 
-    // Event-driven main loop: shell runs in kernel mode (Ring 0)
+    // Idle main loop — shell runs via interrupt-driven callbacks
     while (1) {
         halt();
     }

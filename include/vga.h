@@ -64,4 +64,7 @@ size_t vga_get_cursor_column(void);
 // Save VGA font data from plane 2 (must call at boot before any mode switching)
 void vga_save_font(void);
 
+// Get pointer to saved font data (8x16 bitmaps, 4096 bytes)
+const uint8_t* vga_get_font(void);
+
 #endif // VGA_H

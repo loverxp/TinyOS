@@ -12,6 +12,9 @@ void pic_initialize(void);
 // Unmask (enable) a specific IRQ
 void pic_unmask_irq(uint8_t irq);
 
+// Mask (disable) a specific IRQ
+void pic_mask_irq(uint8_t irq);
+
 // Send End of Interrupt signal
 void pic_send_eoi(uint8_t irq);
 

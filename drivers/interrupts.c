@@ -152,6 +152,21 @@ void pic_unmask_irq(uint8_t irq) {
     outb(port, value);
 }
 
+void pic_mask_irq(uint8_t irq) {
+    uint16_t port;
+    uint8_t value;
+    
+    if (irq < 8) {
+        port = 0x21;
+    } else {
+        port = 0xA1;
+        irq -= 8;
+    }
+    
+    value = inb(port) | (1 << irq);
+    outb(port, value);
+}
+
 void pic_send_eoi(uint8_t irq) {
     if (irq >= 8) {
         outb(0xA0, 0x20);
@@ -242,6 +257,10 @@ extern void keyboard_clear_buffer(void);
 
 #define FONT_SIZE 4096  // 256 chars × 16 bytes each (8x16 font)
 static uint8_t vga_font_buf[FONT_SIZE];
+
+const uint8_t* vga_get_font(void) {
+    return vga_font_buf;
+}
 
 void vga_save_font(void) {
     uint8_t old_seq02, old_seq04;

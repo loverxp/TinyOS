@@ -50,4 +50,8 @@ uint32_t paging_get_fault_err(void);
 // Debug: print page table info
 void paging_dump_info(void);
 
+// Map a virtual page to a physical page (allocates page table if needed)
+// Returns 0 on success, -1 on failure
+int paging_map_page(uint32_t virt_addr, uint32_t phys_addr, int user, int rw);
+
 #endif // PAGING_H

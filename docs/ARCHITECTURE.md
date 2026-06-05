@@ -588,6 +588,29 @@ Shell 命令 "gfxsnake"
 - **字模破坏**: 写入 `0xA0000` 时第 2、6、10… 字节写入 plane 2（即字模平面），破环字体数据
 - **恢复方案**: 开机 `vga_save_font()` 读取 plane 2 保存字模，切换回文本模式时 `vga_restore_font()` 写回
 
+### VBE GUI vs VGA Mode 13h 对比
+
+TinyOS 有两种图形模式，分别服务于不同场景：
+
+| 特性 | VBE 窗口系统 (GUI) | VGA Mode 13h (gfxsnake) |
+|------|-------------------|--------------------------|
+| **标准** | VBE (VESA BIOS Extensions), Bochs VBE I/O 端口 | 标准 VGA Mode 13h |
+| **分辨率** | 800×600 | 320×200 |
+| **色深** | 32-bit 真彩色 (RGB 各 8bit, 1600万色) | 8-bit 索引色 (调色板, 256色) |
+| **显存地址** | PCI BAR 读取 LFB (如 0xE0000000)，需分页映射 | 固定 0xA0000，CPU 直接可访 |
+| **设置方式** | Bochs VBE I/O 端口 (0x01CE/0x01CF) 编程 | 编程 VGA CRTC/Sequencer/GC 寄存器 |
+| **颜色格式** | 直接 RGB 值 | 调色板索引 → DAC |
+| **双缓冲** | 有 (kmalloc backbuffer + memcpy flip) | 无 (直接写 0xA0000) |
+| **运行层级** | 仅内核态 (需页表操作) | 内核态 + 用户态 (syscall 4 切换) |
+| **依赖模块** | PCI 扫描、分页映射、kmalloc、鼠标 | 无额外依赖 |
+| **适用场景** | 窗口管理器、桌面环境、多窗口应用 | 简单像素游戏、快速原型 |
+
+**总结**:
+- **VBE GUI** 适合展示型应用（信息窗口、图形界面），画质好但复杂度高
+- **Mode 13h** 适合游戏类应用（需要快速帧渲染、全屏像素操作），实现简单但画质受限
+- 两者共享 VGA 字模恢复机制：进入图形模式前必须 `vga_save_font()`，退出时 `vga_restore_font()`
+- VBE 切换会破坏 DAC 调色板，每次恢复文本模式时需重新初始化 Attribute Controller 调色板寄存器
+
 ### 关键设计要点
 
 1. **PIC EOI**: `snake_start` 在中断处理链中运行，必须手动发送 IRQ1 EOI

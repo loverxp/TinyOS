@@ -31,9 +31,10 @@ BUILD = build
 # Source files
 C_SRCS    = kernel/kernel.c kernel/shell.c kernel/except.c kernel/gdt.c \
             kernel/tss.c kernel/pmm.c kernel/paging.c kernel/mm.c kernel/loader.c \
-            kernel/scheduler.c kernel/fat16.c kernel/net.c \
+            kernel/scheduler.c kernel/fat16.c kernel/net.c kernel/wm.c \
             drivers/vga.c drivers/keyboard.c drivers/timer.c drivers/interrupts.c \
             drivers/ata.c drivers/pci.c drivers/ne2000.c drivers/serial.c \
+            drivers/vbe.c drivers/framebuf.c drivers/mouse.c drivers/builtin_font.c \
             lib/string.c lib/stdio.c
 ASM_SRCS  = boot/boot.asm drivers/interrupts.asm drivers/gdt.asm \
             drivers/io.asm kernel/user.asm kernel/embedded_user.asm \
