@@ -145,19 +145,41 @@ uint32_t prepare_switch(void) {
             tasks[i].stack_base = 0;
             tasks[i].pid = 0;
             tasks[i].name[0] = '\0';
+            tasks[i].ipc_wait_obj = NULL;
+            tasks[i].ipc_wait_type = 0;
         }
     }
 
     /* Wake sleeping tasks whose deadline has passed */
     uint32_t now = timer_get_ticks();
+    static uint32_t wake_debug_counter = 0;
+    static uint32_t total_wakes = 0;
     for (int i = 1; i < MAX_TASKS; i++) {
-        if (tasks[i].state == TASK_BLOCKED &&
-            tasks[i].sleep_deadline != 0 &&
-            now >= tasks[i].sleep_deadline) {
-            serial_printf("[sched] Waking '%s' (pid=%u)\n",
-                          tasks[i].name, tasks[i].pid);
-            tasks[i].state = TASK_READY;
-            tasks[i].sleep_deadline = 0;
+        if (tasks[i].state == TASK_BLOCKED && tasks[i].sleep_deadline != 0) {
+            /* Log every 50 calls to confirm wake logic runs */
+            if ((wake_debug_counter++ % 50) == 0) {
+                serial_printf("[sched] wake_check: '%s' now=%u deadline=%u delta=%d wakes=%u\n",
+                              tasks[i].name, now, tasks[i].sleep_deadline,
+                              (int32_t)(now - tasks[i].sleep_deadline),
+                              total_wakes);
+            }
+            if (now >= tasks[i].sleep_deadline) {
+                total_wakes++;
+                /* Direct serial debug: send 'W' + '\n' via raw outb */
+                while ((inb(0x3F8 + 5) & 0x20) == 0);  /* wait LSR THRE */
+                outb(0x3F8, 'W');
+                while ((inb(0x3F8 + 5) & 0x20) == 0);
+                outb(0x3F8, '!');
+                while ((inb(0x3F8 + 5) & 0x20) == 0);
+                outb(0x3F8, '\n');
+                serial_printf("[sched] Waking '%s' (pid=%u) now=%u deadline=%u\n",
+                              tasks[i].name, tasks[i].pid,
+                              now, tasks[i].sleep_deadline);
+                tasks[i].state = TASK_READY;
+                tasks[i].sleep_deadline = 0;
+                tasks[i].ipc_wait_obj = NULL;
+                tasks[i].ipc_wait_type = 0;
+            }
         }
     }
 
@@ -166,12 +188,17 @@ uint32_t prepare_switch(void) {
         return 0;
     }
 
-    if (switch_count < 10) {
+    if (switch_count < 20) {
         uint32_t frame_eip = *(uint32_t*)(next->esp + 44);
         uint32_t frame_cs  = *(uint32_t*)(next->esp + 48);
-        serial_printf("[sched] #%u: %s -> %s esp=0x%x EIP=0x%x CS=0x%x\n",
+        serial_printf("[sched] #%u: %s -> %s esp=0x%x EIP=0x%x CS=0x%x",
                       switch_count, current_task->name, next->name,
                       next->esp, frame_eip, frame_cs);
+        if (next->state == TASK_BLOCKED) {
+            serial_printf(" *** BUG: next is BLOCKED! deadline=%u ***",
+                          next->sleep_deadline);
+        }
+        serial_printf("\n");
     }
     switch_count++;
 
@@ -222,6 +249,8 @@ void task_sleep(uint32_t ms) {
     disable_interrupts();
     current_task->sleep_deadline = timer_get_ticks() + ticks;
     current_task->state = TASK_BLOCKED;
+    current_task->ipc_wait_obj = NULL;
+    current_task->ipc_wait_type = 0;
     serial_printf("[sched] '%s' sleeping for %u ticks\n",
                   current_task->name, ticks);
     need_reschedule = 1;
@@ -229,5 +258,23 @@ void task_sleep(uint32_t ms) {
     /* Halt until next interrupt wakes us */
     while (current_task->state == TASK_BLOCKED) {
         halt();
+    }
+}
+
+task_t* scheduler_get_current(void) {
+    return current_task;
+}
+
+void scheduler_wake_ipc(void* obj, uint8_t wait_type) {
+    for (int i = 1; i < MAX_TASKS; i++) {
+        if (tasks[i].state == TASK_BLOCKED &&
+            tasks[i].ipc_wait_obj == obj &&
+            tasks[i].ipc_wait_type == wait_type) {
+            tasks[i].state = TASK_READY;
+            tasks[i].sleep_deadline = 0;
+            tasks[i].ipc_wait_obj = NULL;
+            tasks[i].ipc_wait_type = 0;
+            break;
+        }
     }
 }

@@ -39,6 +39,7 @@
 - **DHCP 客户端**（Discover/Offer/Request/ACK 四步协商，`dhcp` 命令，动态获取 IP/网关/掩码）
 - **TCP 监听命令**（`tcp-recv <port>` 10秒监听，显示接收数据）
 - **Socket 抽象层**（`sock_create`/`bind`/`connect`/`send`/`recv`/`listen`/`close`，UDP+TCP 统一接口，环形接收缓冲区）
+- **进程间通信 (IPC)**（Pipe 字节流管道、Message Queue 消息队列、Shared Memory 共享内存，`ipctest` 命令验证，syscall 10-20）
 
 ---
 
@@ -175,12 +176,37 @@ struct page_directory_entry {
   - `yield()` - 主动让出 CPU (syscall 8)
   - `sleep(ms)` - 睡眠等待 (syscall 9)，设置 `sleep_deadline`，调度器在 `prepare_switch()` 中自动唤醒
 
-### 2.2 进程间通信 (IPC)
+### 2.2 进程间通信 (IPC) ✅ 已实现
 **目标**：进程间数据交换
 
-- [ ] 管道 (Pipe)
-- [ ] 消息队列
-- [ ] 共享内存（需要分页支持）
+- [x] **管道 (Pipe)** (`kernel/ipc.c`)
+  - 512 字节环形缓冲区，最多 8 个 pipe
+  - `pipe_create()` / `pipe_read()` / `pipe_write()` / `pipe_close()`
+  - 满时阻塞写者，空时阻塞读者，写后唤醒读者，读后唤醒写者
+
+- [x] **消息队列 (Message Queue)**
+  - 8 个消息槽，每条最大 64 字节，最多 8 个队列
+  - `mq_create()` / `mq_send()` / `mq_recv()` / `mq_close()`
+  - 消息边界保持（非字节流），FIFO 顺序
+
+- [x] **共享内存 (Shared Memory)**
+  - 按名称查找，`pmm_alloc_page()` 分配物理页
+  - `shm_create(name, size)` / `shm_open(name)` / `shm_close(name)`
+  - 所有任务共享地址空间，返回的指针直接可用
+
+- [x] **IPC 阻塞机制**
+  - `task_t` 扩展 `ipc_wait_obj` + `ipc_wait_type` 字段
+  - `ipc_block()` 阻塞当前任务，`ipc_wake()` 精确唤醒等待者
+  - `scheduler_wake_ipc()` 在调度器内部遍历任务数组
+
+- [x] **系统调用 10-20**（int 0x80）
+  - Pipe: create(10) / read(11) / write(12) / close(13)
+  - MQ: create(14) / send(15) / recv(16) / close(17)
+  - SHM: create(18) / open(19) / close(20)
+
+- [x] **Shell 命令** `ipctest`
+  - 三阶段自动化测试：Pipe → MQ → SHM
+  - 每阶段创建生产者/消费者任务，验证数据完整性和阻塞/唤醒机制
 
 ---
 
@@ -260,7 +286,7 @@ struct page_directory_entry {
 **目标**：命令行解释器
 
 - [x] 命令解析
-- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `ls`, `cat`, `diskinfo`, `pci`, `net`, `ping`, `send`, `recv`, `arp`, `netstat`, `rand`, `write`, `rm`, `dhcp`, `tcp-recv`
+- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `ls`, `cat`, `diskinfo`, `pci`, `net`, `ping`, `send`, `recv`, `arp`, `netstat`, `rand`, `write`, `rm`, `dhcp`, `tcp-recv`, `ipctest`
 - [ ] 程序执行：`fork` + `exec`
 - [ ] 管道支持：`cmd1 | cmd2`
 
@@ -573,7 +599,7 @@ v0.1 ──> v0.15 ──> v0.2 ──> v0.3 ──> v0.4 ──> v0.5 ──> v
 引导    构建系统   内存管理   异常处理   多任务✓   调度器✓   VFS      用户态    网络
 VGA     GDB调试   分页机制   printf    TCB✓     系统调用   RAMFS    crt0      GUI
 键盘    调试框架   堆分配器  蓝屏      上下文✓   同步     FAT12    libc      TCP/IP✓
-定时器   RTC驱动              栈回溯    IPC       锁      IDE       ELF加载  信号
+定时器   RTC驱动              栈回溯    IPC✓      锁      IDE       ELF加载  信号
 用户态   鼠标                            Spinlock           二进制加载  ACPI
 系统调用  PCI                              Mutex               用户程序   SMP
 ```
@@ -590,6 +616,7 @@ VGA     GDB调试   分页机制   printf    TCB✓     系统调用   RAMFS    
 | v0.2 | kmalloc/kfree 工作 | 分配内存并读写测试 |
 | v0.3 | 页故障正确处理 | 访问无效地址触发蓝屏 |
 | v0.4 | 两个任务交替运行 | `schedtest` 命令验证 A B 交替 |
+| v0.4+ | IPC 三种机制正常 | `ipctest` 命令验证 Pipe/MQ/SHM 全部 PASS |
 | v0.5 | 系统调用正常工作 | 用户程序调用 `write()` |
 | v0.6 | 文件读写正常 | `echo hello > file.txt` |
 | v0.7 | 磁盘分区可挂载 | `mount /dev/hda1 /mnt` |

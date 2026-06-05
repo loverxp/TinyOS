@@ -25,6 +25,7 @@
 #include "../include/webserver.h"
 #include "../include/rtc.h"
 #include "../include/prng.h"
+#include "../include/ipc.h"
 
 #define LINE_BUF_SIZE 256
 
@@ -453,6 +454,132 @@ static void cmd_schedtest(const char* args) {
     printf("Tasks created. They will auto-stop after %u seconds.\n", duration);
 }
 
+// ── IPC Test command ─────────────────────────────────────────────────
+// Three-phase test: Pipe → Message Queue → Shared Memory
+
+static volatile int ipc_phase_done = 0;
+
+static int ipc_pipe_id = -1;
+static volatile int ipc_pipe_result = -1;
+
+static void ipc_pipe_producer(void) {
+    const char* msg = "Hello IPC!";
+    int len = 0;
+    while (msg[len]) len++;
+    pipe_write(ipc_pipe_id, msg, len);
+    task_exit();
+}
+
+static void ipc_pipe_consumer(void) {
+    char buf[64];
+    int n = pipe_read(ipc_pipe_id, buf, sizeof(buf));
+    if (n == 10 && memcmp(buf, "Hello IPC!", 10) == 0) {
+        ipc_pipe_result = 0;
+    } else {
+        ipc_pipe_result = 1;
+    }
+    ipc_phase_done = 1;
+    task_exit();
+}
+
+static int ipc_mq_id = -1;
+static volatile int ipc_mq_result = -1;
+
+static void ipc_mq_sender(void) {
+    mq_send(ipc_mq_id, "msg_one", 7);
+    mq_send(ipc_mq_id, "msg_two", 7);
+    mq_send(ipc_mq_id, "msg_thr", 7);
+    task_exit();
+}
+
+static void ipc_mq_receiver(void) {
+    char buf[64];
+    int ok = 1;
+    int n;
+
+    n = mq_recv(ipc_mq_id, buf, sizeof(buf));
+    if (n != 7 || memcmp(buf, "msg_one", 7) != 0) ok = 0;
+
+    n = mq_recv(ipc_mq_id, buf, sizeof(buf));
+    if (n != 7 || memcmp(buf, "msg_two", 7) != 0) ok = 0;
+
+    n = mq_recv(ipc_mq_id, buf, sizeof(buf));
+    if (n != 7 || memcmp(buf, "msg_thr", 7) != 0) ok = 0;
+
+    ipc_mq_result = ok ? 0 : 1;
+    ipc_phase_done = 1;
+    task_exit();
+}
+
+static volatile int ipc_shm_result = -1;
+
+static void ipc_shm_writer(void) {
+    uint32_t* p = (uint32_t*)shm_create("test", 64);
+    if (p) {
+        p[0] = 0xDEADBEEF;
+        p[1] = 42;
+    }
+    task_exit();
+}
+
+static void ipc_shm_reader(void) {
+    task_sleep(100);
+    uint32_t* p = (uint32_t*)shm_open("test");
+    if (p && p[0] == 0xDEADBEEF && p[1] == 42) {
+        ipc_shm_result = 0;
+    } else {
+        ipc_shm_result = 1;
+    }
+    shm_close("test");
+    ipc_phase_done = 1;
+    task_exit();
+}
+
+static void cmd_ipctest(void) {
+    printf("=== IPC Test ===\n");
+
+    /* Phase 1: Pipe */
+    printf("[Pipe] Creating pipe...\n");
+    ipc_pipe_id = pipe_create();
+    if (ipc_pipe_id < 0) {
+        printf("[Pipe] FAILED: pipe_create returned -1\n");
+        return;
+    }
+    ipc_phase_done = 0;
+    ipc_pipe_result = -1;
+    task_create("ipc_cons", ipc_pipe_consumer);
+    task_create("ipc_prod", ipc_pipe_producer);
+    while (!ipc_phase_done) { task_sleep(50); }
+    pipe_close(ipc_pipe_id);
+    printf("[Pipe] %s\n", ipc_pipe_result == 0 ? "PASS" : "FAIL");
+
+    /* Phase 2: Message Queue */
+    printf("[MQ] Creating message queue...\n");
+    ipc_mq_id = mq_create();
+    if (ipc_mq_id < 0) {
+        printf("[MQ] FAILED: mq_create returned -1\n");
+        return;
+    }
+    ipc_phase_done = 0;
+    ipc_mq_result = -1;
+    task_create("ipc_mqrx", ipc_mq_receiver);
+    task_create("ipc_mqtx", ipc_mq_sender);
+    while (!ipc_phase_done) { task_sleep(50); }
+    mq_close(ipc_mq_id);
+    printf("[MQ] %s\n", ipc_mq_result == 0 ? "PASS" : "FAIL");
+
+    /* Phase 3: Shared Memory */
+    printf("[SHM] Creating shared memory 'test'...\n");
+    ipc_phase_done = 0;
+    ipc_shm_result = -1;
+    task_create("ipc_shmr", ipc_shm_reader);
+    task_create("ipc_shmw", ipc_shm_writer);
+    while (!ipc_phase_done) { task_sleep(50); }
+    printf("[SHM] %s\n", ipc_shm_result == 0 ? "PASS" : "FAIL");
+
+    printf("=== IPC Test Done ===\n");
+}
+
 // ── GUI command ──────────────────────────────────────────────────────
 // Start VBE graphics mode GUI with window manager.
 // Press Escape to exit back to shell.
@@ -610,6 +737,7 @@ static void shell_handle_command(const char* cmd) {
             printf("  gfxsnake   - Play Snake game (pixel graphics mode)\n");
             printf("  hello      - Run hello user program\n");
             printf("  schedtest [N]- Start scheduler test for N seconds\n");
+            printf("  ipctest      - Run IPC test (Pipe, MQ, SharedMem)\n");
             printf("  gui        - Start graphical UI (VBE mode)\n");
             printf("  ls         - List files on disk\n");
             printf("  cat <file> - Print file contents\n");
@@ -707,6 +835,8 @@ static void shell_handle_command(const char* cmd) {
         const char* args = cmd + 9;
         while (*args == ' ') args++;
         cmd_schedtest(*args ? args : NULL);
+    } else if (strcmp(cmd, "ipctest") == 0) {
+        cmd_ipctest();
     } else if (strcmp(cmd, "gui") == 0) {
         cmd_gui();
     } else if (strcmp(cmd, "ls") == 0) {

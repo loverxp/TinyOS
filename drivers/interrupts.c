@@ -252,6 +252,17 @@ extern uint32_t keyboard_read_key(void);
 extern void keyboard_clear_buffer(void);
 extern void task_yield(void);
 extern void task_sleep(uint32_t ms);
+extern int pipe_create(void);
+extern int pipe_read(int id, void* buf, uint32_t max_len);
+extern int pipe_write(int id, const void* data, uint32_t len);
+extern void pipe_close(int id);
+extern int mq_create(void);
+extern int mq_send(int id, const void* data, uint32_t len);
+extern int mq_recv(int id, void* buf, uint32_t max_len);
+extern void mq_close(int id);
+extern void* shm_create(const char* name, uint32_t size);
+extern void* shm_open(const char* name);
+extern int shm_close(const char* name);
 
 // ── VGA Font Save/Restore ─────────────────────────────────────────────
 // Mode 13h (chain-4) writing to 0xA0000 corrupts the font data in VGA plane 2.
@@ -668,6 +679,53 @@ void syscall_handler(uint32_t* regs) {
     if (syscall_no == 9) {
         // Syscall 9: sleep for N milliseconds (arg1 = ms)
         task_sleep(arg1);
+        return;
+    }
+
+    uint32_t arg3 = regs[6]; // EDX
+
+    if (syscall_no == 10) {
+        regs[8] = (uint32_t)pipe_create();
+        return;
+    }
+    if (syscall_no == 11) {
+        regs[8] = (uint32_t)pipe_read((int)arg1, (void*)arg2, arg3);
+        return;
+    }
+    if (syscall_no == 12) {
+        regs[8] = (uint32_t)pipe_write((int)arg1, (const void*)arg2, arg3);
+        return;
+    }
+    if (syscall_no == 13) {
+        pipe_close((int)arg1);
+        return;
+    }
+    if (syscall_no == 14) {
+        regs[8] = (uint32_t)mq_create();
+        return;
+    }
+    if (syscall_no == 15) {
+        regs[8] = (uint32_t)mq_send((int)arg1, (const void*)arg2, arg3);
+        return;
+    }
+    if (syscall_no == 16) {
+        regs[8] = (uint32_t)mq_recv((int)arg1, (void*)arg2, arg3);
+        return;
+    }
+    if (syscall_no == 17) {
+        mq_close((int)arg1);
+        return;
+    }
+    if (syscall_no == 18) {
+        regs[8] = (uint32_t)shm_create((const char*)arg1, arg2);
+        return;
+    }
+    if (syscall_no == 19) {
+        regs[8] = (uint32_t)shm_open((const char*)arg1);
+        return;
+    }
+    if (syscall_no == 20) {
+        regs[8] = (uint32_t)shm_close((const char*)arg1);
         return;
     }
 

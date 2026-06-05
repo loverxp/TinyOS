@@ -18,6 +18,7 @@
 #include "../include/net.h"
 #include "../include/serial.h"
 #include "../include/vbe.h"
+#include "../include/ipc.h"
 
 // User mode entry points (from user.asm)
 extern void run_user_task(void (*entry)(void));
@@ -138,6 +139,9 @@ void kernel_main(uint32_t multiboot_info_addr) {
 
     scheduler_init();
     serial_writestring("[OK] Scheduler\n");
+
+    ipc_init();
+    serial_writestring("[OK] IPC\n");
 
     /* Initialize ATA disk driver */
     if (ata_init() == 0) {

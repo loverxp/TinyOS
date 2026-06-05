@@ -85,6 +85,8 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - `kernel/net.c`: 网络协议栈（ARP / IPv4 / ICMP / UDP / TCP / DHCP），含 ARP 表访问 API、网络统计、Socket 抽象层
 - `kernel/fat16.c`: FAT16 文件系统（读/写/删除，FAT 链分配/释放）
 - `drivers/ata.c`: ATA PIO 驱动（读/写扇区，CACHE FLUSH）
+- `kernel/ipc.c`: 进程间通信（Pipe 管道、Message Queue 消息队列、Shared Memory 共享内存）
+- `include/ipc.h`: IPC API 定义（pipe_t、mqueue_t、shm_region_t、函数声明）
 
 ## 内存布局
 - 内核加载地址: 0x100000 (1MB)
@@ -115,6 +117,7 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - Snake 游戏采用中断驱动架构：`snake_tick`（IRQ0 回调）处理游戏逻辑，主循环负责渲染（通过 `needs_render` 标志）
 - **多任务调度器**: 抢占式 Round-Robin，IRQ0 每次 tick 设置 `need_reschedule=1`，`irq_common_stub` 在 EOI 后调用 `prepare_switch()` + `do_switch()` 完成上下文切换。idle 任务（主循环）作为循环链表节点参与轮换
 - **schedtest 命令**: `schedtest [N]` 创建两个测试线程交替打印 A/B，N 秒后自动退出（默认 10 秒，上限 300 秒）。任务通过 `task_exit()` 标记 FINISHED
+- **IPC 阻塞与唤醒**: `ipc_block()` 将当前任务设为 BLOCKED 并记录 `ipc_wait_obj`/`ipc_wait_type`，然后 halt 等待。数据到达后 `ipc_wake()` 调用 `scheduler_wake_ipc()` 遍历任务数组精确唤醒匹配等待者和等待类型的任务。IPC 阻塞的任务 `sleep_deadline=0`，不会被定时器唤醒逻辑误触
 - **gfxsnake**: 新版 VGA Mode 13h 像素模式贪吃蛇，作为用户程序在 Ring 3 运行，使用系统调用切换视频模式和读取输入
 - **VGA 字模恢复机制**: Mode 13h (chain-4) 写入 `0xA0000` 时会破坏 VGA plane 2 的字体数据。内核在开机时调用 `vga_save_font()` 保存 4096 字节字模到缓冲区，切换回文本模式时由 `vga_set_mode03h()` 调用 `vga_restore_font()` 恢复
 - **VGA Mode 13h 初始化顺序**: Misc Output → Sequencer (复位→编程→释放) → Graphics Controller → CRTC (解锁→编程→上锁) → Attribute Controller (编程→重新使能) → DAC 调色板。顺序错误会导致黑屏或花屏
@@ -135,6 +138,7 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - **`ping <ip>`** / **`send <ip> <port> <msg>`**: 发送 ICMP 和 UDP，首次会自动 ARP 解析
 - **`write <file> <text>`**: 创建或覆写文件到 FAT16 磁盘。文件名 8.3 格式，文本不支持引号
 - **`rm <file>`**: 删除文件，释放 FAT 链和目录项
+- **`ipctest`**: 运行 IPC 三阶段自动化测试（Pipe 管道 → MQ 消息队列 → SHM 共享内存），验证阻塞/唤醒机制和数据完整性
 - **Windows 发送 UDP 到 TinyOS**（Windows 无 netcat）:
   ```powershell
   python -c "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.sendto(b'Hello', ('127.0.0.1', 8888)); s.close()"
@@ -144,6 +148,15 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - **Syscall 8**: `yield()` — 主动让出 CPU，触发 `need_reschedule=1`
 - **Syscall 9**: `sleep(ms)` — 睡眠指定毫秒数（定时器 50Hz，精度 20ms），设置 `sleep_deadline`，调度器在 `prepare_switch()` 中自动唤醒到期任务
 
+## IPC 进程间通信
+- **Pipe**（管道）: 512 字节环形缓冲区，最多 8 个。`pipe_create()` / `read()` / `write()` / `close()`。空时阻塞读者，满时阻塞写者
+- **Message Queue**（消息队列）: 8 槽 × 64 字节，最多 8 个。`mq_create()` / `send()` / `recv()` / `close()`。保持消息边界，FIFO 顺序
+- **Shared Memory**（共享内存）: 按名称查找，PMM 页分配。`shm_create(name, size)` / `shm_open(name)` / `shm_close(name)`。所有任务共享地址空间
+- **阻塞机制**: `task_t` 扩展 `ipc_wait_obj`（等待对象指针）+ `ipc_wait_type`（1=读, 2=写）。`ipc_block()` 设 BLOCKED+halt，`ipc_wake()` 通过 `scheduler_wake_ipc()` 精确唤醒
+- **系统调用 10-20**: Pipe(10-13) / MQ(14-17) / SHM(18-20)，通过 int 0x80 调用
+- **Shell 命令**: `ipctest` — 三阶段自动化测试（Pipe → MQ → SHM），每阶段创建生产者/消费者任务验证
+
 ## 已知问题（搁置）
 - **退出 GUI 后键盘可能无响应**: `cmd_gui` 退出流程中 `shell_char_callback` 重注册时机与键盘中断存在竞态，或 `enable_interrupts()` 前后 8042 状态不一致。临时绕过：使用串口终端
 - **首次划入 QEMU 窗口鼠标位置不正确**: PS/2 鼠标初始化后的首个数据包包含异常位移值，导致光标瞬间跳到错误位置。后续恢复正常。可免方案：忽略前 N 个数据包
+- **schedtest `task_sleep` 唤醒未验证**: `task_sleep()` 设置 `state = TASK_BLOCKED` 后，`prepare_switch` 中的唤醒逻辑 (`now >= sleep_deadline` → `TASK_READY`) 在代码层面正确，但日志中 `wake_check` 始终显示 `wakes=0, delta=-9`（deadline 永远差 9 tick 到期），且无 `W!` / `[sched] Waking` 输出。旧版二进制（`task_sleep` 前）任务靠 busy-wait 运行，不真正阻塞，故无需唤醒。当前代码若任务真正 BLOCKED 且唤醒未触发，任务会永久卡死。**待验证**：手动删除 `logs/serial.log` 后重新 `make run-debug`

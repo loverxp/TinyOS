@@ -31,7 +31,7 @@ BUILD = build
 # Source files
 C_SRCS    = kernel/kernel.c kernel/shell.c kernel/except.c kernel/gdt.c \
             kernel/tss.c kernel/pmm.c kernel/paging.c kernel/mm.c kernel/loader.c \
-            kernel/scheduler.c kernel/fat16.c kernel/net.c kernel/wm.c \
+            kernel/scheduler.c kernel/ipc.c kernel/fat16.c kernel/net.c kernel/wm.c \
             kernel/webserver.c \
             drivers/vga.c drivers/keyboard.c drivers/timer.c drivers/interrupts.c \
             drivers/ata.c drivers/pci.c drivers/ne2000.c drivers/serial.c \

@@ -22,6 +22,8 @@ typedef struct task {
     uint32_t stack_base;
     uint32_t ticks_used;
     uint32_t sleep_deadline;  /* timer tick at which to wake (0 = not sleeping) */
+    void*    ipc_wait_obj;    /* pointer to pipe/mqueue waiting on (NULL = not waiting) */
+    uint8_t  ipc_wait_type;   /* 0=none, 1=wait-for-read, 2=wait-for-write */
     struct task* next;
 } task_t;
 
@@ -36,5 +38,7 @@ uint32_t prepare_switch(void);
 void task_exit(void);
 void task_yield(void);          /* Voluntarily give up CPU */
 void task_sleep(uint32_t ms);   /* Sleep for N milliseconds */
+task_t* scheduler_get_current(void);
+void scheduler_wake_ipc(void* obj, uint8_t wait_type);
 
 #endif // SCHEDULER_H
