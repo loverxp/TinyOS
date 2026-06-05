@@ -24,6 +24,7 @@
 #include "../include/builtin_font.h"
 #include "../include/webserver.h"
 #include "../include/rtc.h"
+#include "../include/prng.h"
 
 #define LINE_BUF_SIZE 256
 
@@ -36,6 +37,27 @@ static void shell_prompt(void) {
 }
 
 static void shell_handle_command(const char* cmd);
+
+/* UDP recv callback for the 'recv' command — prints received data to screen */
+static void shell_udp_recv_cb(uint32_t src_ip, uint16_t src_port,
+                                uint16_t dst_port,
+                                const uint8_t* data, uint16_t len) {
+    printf("\n[UDP %u.%u.%u.%u:%u -> :%u] (%u bytes)\n",
+           src_ip & 0xFF, (src_ip >> 8) & 0xFF,
+           (src_ip >> 16) & 0xFF, (src_ip >> 24) & 0xFF,
+           src_port, dst_port, len);
+    /* Print data as text (up to 256 chars) */
+    uint16_t show = len < 256 ? len : 256;
+    for (uint16_t i = 0; i < show; i++) {
+        char c = (char)data[i];
+        if (c >= 32 && c < 127) {
+            vga_putchar(c);
+            serial_putchar(c);
+        }
+    }
+    if (show < len) printf("...");
+    printf("\n");
+}
 
 void shell_char_callback(char c) {
     if (c == '\n' || c == '\r') {
@@ -575,8 +597,13 @@ static void shell_handle_command(const char* cmd) {
             printf("  diskinfo   - Show disk/filesystem info\n");
             printf("  pci        - List PCI devices\n");
             printf("  net        - Show network config\n");
-            printf("  ping <ip>  - Send ICMP echo request (ARP)\n");
+            printf("  ping <ip>  - Send ICMP echo request\n");
             printf("  send <ip> <port> <msg> - Send UDP packet\n");
+            printf("  recv <port> - Listen for UDP packets (5s)\n");
+            printf("  arp        - Show ARP cache\n");
+            printf("  arp -c     - Clear ARP cache\n");
+            printf("  netstat    - Show network statistics\n");
+            printf("  rand       - Show a random number (PRNG)\n");
             printf("  webserver  - Start HTTP server (port 80, hostfwd :8088)\n");
             printf("  webserver stop - Stop HTTP server\n");
             printf("  date       - Show current date/time (CMOS RTC)\n");
@@ -711,39 +738,25 @@ static void shell_handle_command(const char* cmd) {
         uint32_t a, b, c, d;
         if (parse_ip(ipstr, &a, &b, &c, &d)) {
             uint32_t target_ip = IP4(a, b, c, d);
-            printf("[1/4] Target IP: %u.%u.%u.%u\n", a, b, c, d);
+            printf("Pinging %u.%u.%u.%u...\n", a, b, c, d);
 
-            uint32_t my_ip, my_gw, my_mask;
-            net_get_config(&my_ip, &my_gw, &my_mask);
-            printf("[2/4] Route: dst=%u.%u.%u.%u", a, b, c, d);
-            if ((target_ip & my_mask) != (my_ip & my_mask)) {
-                printf(" via gateway %u.%u.%u.%u\n",
-                       my_gw & 0xFF, (my_gw >> 8) & 0xFF,
-                       (my_gw >> 16) & 0xFF, (my_gw >> 24) & 0xFF);
-            } else {
-                printf(" direct (same subnet)\n");
-            }
-
-            printf("[3/4] Sending ICMP echo...\n");
             int ret = net_send_icmp_echo(target_ip, 1, 1);
             if (ret < 0) {
-                printf("[4/4] ARP table miss -> sending ARP request...\n");
+                /* ARP not cached, poll for ARP reply */
                 uint32_t start = timer_get_ticks();
                 int resolved = 0;
-                int attempts = 0;
                 while (timer_get_ticks() - start < 10) {  /* ~200ms at 50Hz */
-                    printf("  Polling for ARP reply... (attempt %d)\n", ++attempts);
                     ne2000_poll_recv();
                     ret = net_send_icmp_echo(target_ip, 1, 1);
                     if (ret >= 0) { resolved = 1; break; }
                 }
                 if (resolved) {
-                    printf("  ARP resolved OK!\nPing sent to %u.%u.%u.%u\n", a, b, c, d);
+                    printf("Ping sent to %u.%u.%u.%u\n", a, b, c, d);
                 } else {
-                    printf("  ARP timeout after %d attempts\n", attempts);
+                    printf("ARP timeout: could not resolve %u.%u.%u.%u\n", a, b, c, d);
                 }
             } else {
-                printf("[4/4] ARP already cached\nPing sent to %u.%u.%u.%u\n", a, b, c, d);
+                printf("Ping sent to %u.%u.%u.%u\n", a, b, c, d);
             }
         } else {
             printf("Usage: ping A.B.C.D\n");
@@ -765,39 +778,23 @@ static void shell_handle_command(const char* cmd) {
             while (*arg == ' ') arg++;
             /* Rest is message */
             uint32_t target_ip = IP4(a, b, c, d);
-            printf("[1/4] Target: %u.%u.%u.%u:%u, msg=\"%s\"\n", a, b, c, d, port, arg);
 
-            uint32_t my_ip, my_gw, my_mask;
-            net_get_config(&my_ip, &my_gw, &my_mask);
-            printf("[2/4] Route: dst=%u.%u.%u.%u", a, b, c, d);
-            if ((target_ip & my_mask) != (my_ip & my_mask)) {
-                printf(" via gateway %u.%u.%u.%u\n",
-                       my_gw & 0xFF, (my_gw >> 8) & 0xFF,
-                       (my_gw >> 16) & 0xFF, (my_gw >> 24) & 0xFF);
-            } else {
-                printf(" direct (same subnet)\n");
-            }
-
-            printf("[3/4] Sending UDP...\n");
             int ret = net_send_udp(target_ip, (uint16_t)port, 1234, arg, strlen(arg));
             if (ret < 0) {
-                printf("[4/4] ARP table miss -> sending ARP request...\n");
                 uint32_t start = timer_get_ticks();
                 int resolved = 0;
-                int attempts = 0;
                 while (timer_get_ticks() - start < 10) {
-                    printf("  Polling for ARP reply... (attempt %d)\n", ++attempts);
                     ne2000_poll_recv();
                     ret = net_send_udp(target_ip, (uint16_t)port, 1234, arg, strlen(arg));
                     if (ret >= 0) { resolved = 1; break; }
                 }
                 if (resolved) {
-                    printf("  ARP resolved OK!\nSent %u bytes to %u.%u.%u.%u:%u\n", strlen(arg), a, b, c, d, port);
+                    printf("Sent %u bytes to %u.%u.%u.%u:%u\n", strlen(arg), a, b, c, d, port);
                 } else {
-                    printf("  ARP timeout after %d attempts\n", attempts);
+                    printf("ARP timeout: could not resolve %u.%u.%u.%u\n", a, b, c, d);
                 }
             } else {
-                printf("[4/4] ARP already cached\nSent %u bytes to %u.%u.%u.%u:%u\n", strlen(arg), a, b, c, d, port);
+                printf("Sent %u bytes to %u.%u.%u.%u:%u\n", strlen(arg), a, b, c, d, port);
             }
         } else {
             printf("Usage: send A.B.C.D <port> <message>\n");
@@ -816,6 +813,66 @@ static void shell_handle_command(const char* cmd) {
         printf("%04u-%02u-%02u %02u:%02u:%02u\n",
                tm.year, tm.month, tm.day,
                tm.hour, tm.minute, tm.second);
+    } else if (strncmp(cmd, "arp", 3) == 0) {
+        const char* arg = cmd + 3;
+        while (*arg == ' ') arg++;
+        if (strcmp(arg, "-c") == 0 || strcmp(arg, "clear") == 0) {
+            net_arp_clear();
+            printf("ARP cache cleared.\n");
+        } else {
+            printf("ARP cache:\n");
+            int found = 0;
+            for (int i = 0; i < ARP_TABLE_SIZE; i++) {
+                const arp_entry_t* e = net_arp_table_get(i);
+                if (e) {
+                    printf("  %u.%u.%u.%u -> %02x:%02x:%02x:%02x:%02x:%02x\n",
+                           e->ip & 0xFF, (e->ip >> 8) & 0xFF,
+                           (e->ip >> 16) & 0xFF, (e->ip >> 24) & 0xFF,
+                           e->mac[0], e->mac[1], e->mac[2],
+                           e->mac[3], e->mac[4], e->mac[5]);
+                    found++;
+                }
+            }
+            if (found == 0) printf("  (empty)\n");
+        }
+    } else if (strcmp(cmd, "netstat") == 0) {
+        const net_stats_t* s = net_get_stats();
+        printf("Network statistics:\n");
+        printf("  RX packets: %u\n", s->rx_packets);
+        printf("  TX packets: %u\n", s->tx_packets);
+        printf("  RX errors:  %u\n", s->rx_errors);
+        printf("  TX errors:  %u\n", s->tx_errors);
+        printf("  ARP:  %u requests sent, %u replies recv\n", s->arp_requests_sent, s->arp_replies_recv);
+        printf("  ICMP: %u sent, %u recv\n", s->icmp_sent, s->icmp_recv);
+        printf("  UDP:  %u sent, %u recv\n", s->udp_sent, s->udp_recv);
+        printf("  TCP:  %u sent, %u recv\n", s->tcp_sent, s->tcp_recv);
+    } else if (strncmp(cmd, "recv ", 5) == 0) {
+        const char* arg = cmd + 5;
+        while (*arg == ' ') arg++;
+        uint32_t port = 0;
+        while (*arg >= '0' && *arg <= '9') {
+            port = port * 10 + (*arg++ - '0');
+        }
+        if (port == 0 || port > 65535) {
+            printf("Usage: recv <port>\n");
+        } else {
+            printf("Listening on UDP port %u (5 seconds)...\n", port);
+            /* Send EOI for keyboard IRQ1 since we're in the handler */
+            outb(0x20, 0x20);
+            /* Temporary recv callback that prints to screen */
+            net_set_udp_callback(shell_udp_recv_cb);
+            enable_interrupts();
+            uint32_t deadline = timer_get_ticks() + 250;  /* 5 seconds */
+            while (timer_get_ticks() < deadline) {
+                asm volatile("hlt");
+            }
+            net_set_udp_callback(NULL);
+            printf("\nDone listening on port %u.\n", port);
+            shell_prompt();
+        }
+    } else if (strcmp(cmd, "rand") == 0) {
+        prng_seed(timer_get_ticks());
+        printf("%u\n", prng_next());
     } else {
         printf("Unknown command: %s\n", cmd);
         printf("Type 'help' for available commands.\n");

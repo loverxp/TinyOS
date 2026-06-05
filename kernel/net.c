@@ -20,6 +20,9 @@ static udp_recv_callback_t udp_callback = NULL;
 /* Broadcast MAC */
 static const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
+/* Network statistics */
+static net_stats_t stats;
+
 /* ---- Checksum ---- */
 
 static uint16_t ip_checksum(const void* data, uint16_t len) {
@@ -105,6 +108,7 @@ int net_send_arp_request(uint32_t target_ip) {
                   target_ip & 0xFF, (target_ip >> 8) & 0xFF,
                   (target_ip >> 16) & 0xFF, (target_ip >> 24) & 0xFF);
 
+    stats.arp_requests_sent++;
     return ne2000_send(tx_frame, frame_len);
 }
 
@@ -137,6 +141,7 @@ static void handle_arp(const uint8_t* data, uint16_t len) {
 
     /* Add sender to ARP table */
     arp_table_add(arp->sender_ip, arp->sender_mac);
+    if (opcode == ARP_OP_REPLY) stats.arp_replies_recv++;
 
     if (opcode == ARP_OP_REQUEST && arp->target_ip == my_ip) {
         serial_printf("[ARP] Received request for us, sending reply\n");
@@ -213,6 +218,7 @@ int net_send_icmp_echo(uint32_t dst_ip, uint16_t id, uint16_t seq) {
     ip_header_t* ip = (ip_header_t*)(tx_frame + sizeof(eth_header_t));
     build_ip_header(ip, dst_ip, IP_PROTO_ICMP, icmp_len);
 
+    stats.icmp_sent++;
     uint16_t frame_len = sizeof(eth_header_t) + 20 + icmp_len;
     return ne2000_send(tx_frame, frame_len);
 }
@@ -240,6 +246,7 @@ static void handle_icmp(const uint8_t* data, uint16_t len, uint32_t src_ip) {
         ip_header_t* ip = (ip_header_t*)(tx_frame + sizeof(eth_header_t));
         build_ip_header(ip, src_ip, IP_PROTO_ICMP, len);
 
+        stats.icmp_recv++;
         uint16_t frame_len = sizeof(eth_header_t) + 20 + len;
         ne2000_send(tx_frame, frame_len);
 
@@ -281,6 +288,7 @@ int net_send_udp(uint32_t dst_ip, uint16_t dst_port,
     ip_header_t* ip = (ip_header_t*)(tx_frame + sizeof(eth_header_t));
     build_ip_header(ip, dst_ip, IP_PROTO_UDP, payload_len);
 
+    stats.udp_sent++;
     uint16_t frame_len = sizeof(eth_header_t) + 20 + payload_len;
     return ne2000_send(tx_frame, frame_len);
 }
@@ -293,6 +301,7 @@ static void handle_udp(const uint8_t* data, uint16_t len, uint32_t src_ip) {
     if (data_len > len - sizeof(udp_header_t)) data_len = len - sizeof(udp_header_t);
 
     if (udp_callback) {
+        stats.udp_recv++;
         udp_callback(src_ip, ntohs(udp->src_port), ntohs(udp->dst_port),
                      data + sizeof(udp_header_t), data_len);
     }
@@ -395,6 +404,7 @@ static void tcp_send_segment(tcp_conn_t* conn, uint32_t dst_ip, uint16_t dst_por
     build_ip_header(ip, dst_ip, IP_PROTO_TCP, tcp_len);
 
     uint16_t frame_len = sizeof(eth_header_t) + 20 + tcp_len;
+    stats.tcp_sent++;
     ne2000_send(tx_frame, frame_len);
 }
 
@@ -522,6 +532,7 @@ static void handle_tcp(const uint8_t* data, uint16_t len, uint32_t src_ip) {
     }
 
     if (payload_len > 0 && conn->state == TCP_ESTABLISHED) {
+        stats.tcp_recv++;
         conn->seq = seq + payload_len;
 
         /* Send ACK for received data */
@@ -573,6 +584,7 @@ static void handle_ip(const uint8_t* data, uint16_t len) {
 
 void net_recv_handler(const uint8_t* frame, uint16_t len) {
     if (len < sizeof(eth_header_t)) {
+        stats.rx_errors++;
         serial_printf("[NET] recv: frame too short (%u bytes)\n", len);
         return;
     }
@@ -581,6 +593,8 @@ void net_recv_handler(const uint8_t* frame, uint16_t len) {
     uint16_t ethertype = ntohs(eth->ethertype);
     const uint8_t* payload = frame + sizeof(eth_header_t);
     uint16_t payload_len = len - sizeof(eth_header_t);
+
+    stats.rx_packets++;
 
     serial_printf("[NET] recv: len=%u dst=%02x:%02x:%02x:%02x:%02x:%02x "
                   "src=%02x:%02x:%02x:%02x:%02x:%02x ethertype=0x%04x\n",
@@ -622,6 +636,7 @@ void net_init(uint32_t ip_addr, uint32_t gateway, uint32_t subnet_mask) {
 
     memset(arp_table, 0, sizeof(arp_table));
     ip_id_counter = 0;
+    memset(&stats, 0, sizeof(stats));
 
     serial_printf("[NET] IP: %u.%u.%u.%u, GW: %u.%u.%u.%u, Mask: %u.%u.%u.%u\n",
                   ip_addr & 0xFF, (ip_addr >> 8) & 0xFF, (ip_addr >> 16) & 0xFF, (ip_addr >> 24) & 0xFF,
@@ -640,4 +655,24 @@ void net_get_config(uint32_t* ip, uint32_t* gateway, uint32_t* mask) {
     if (ip) *ip = my_ip;
     if (gateway) *gateway = my_gateway;
     if (mask) *mask = my_mask;
+}
+
+/* ARP table access */
+const arp_entry_t* net_arp_table_get(int index) {
+    if (index < 0 || index >= ARP_TABLE_SIZE) return NULL;
+    if (!arp_table[index].valid) return NULL;
+    return &arp_table[index];
+}
+
+void net_arp_clear(void) {
+    memset(arp_table, 0, sizeof(arp_table));
+}
+
+/* Statistics */
+const net_stats_t* net_get_stats(void) {
+    return &stats;
+}
+
+void net_stats_reset(void) {
+    memset(&stats, 0, sizeof(stats));
 }

@@ -37,7 +37,7 @@ C_SRCS    = kernel/kernel.c kernel/shell.c kernel/except.c kernel/gdt.c \
             drivers/ata.c drivers/pci.c drivers/ne2000.c drivers/serial.c \
             drivers/vbe.c drivers/framebuf.c drivers/mouse.c drivers/builtin_font.c \
             drivers/rtc.c \
-            lib/string.c lib/stdio.c
+            lib/string.c lib/stdio.c lib/prng.c lib/debug.c
 ASM_SRCS  = boot/boot.asm drivers/interrupts.asm drivers/gdt.asm \
             drivers/io.asm kernel/user.asm kernel/embedded_user.asm \
             kernel/embedded_hello.asm kernel/switch.asm

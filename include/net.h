@@ -144,6 +144,22 @@ typedef struct {
 typedef void (*tcp_recv_callback_t)(uint32_t src_ip, uint16_t src_port,
                                     const uint8_t* data, uint16_t len);
 
+/* Network statistics */
+typedef struct {
+    uint32_t rx_packets;
+    uint32_t tx_packets;
+    uint32_t rx_errors;
+    uint32_t tx_errors;
+    uint32_t arp_requests_sent;
+    uint32_t arp_replies_recv;
+    uint32_t icmp_sent;
+    uint32_t icmp_recv;
+    uint32_t udp_sent;
+    uint32_t udp_recv;
+    uint32_t tcp_sent;
+    uint32_t tcp_recv;
+} net_stats_t;
+
 /* API */
 void net_init(uint32_t ip_addr, uint32_t gateway, uint32_t subnet_mask);
 void net_recv_handler(const uint8_t* frame, uint16_t len);
@@ -154,6 +170,14 @@ int net_send_icmp_echo(uint32_t dst_ip, uint16_t id, uint16_t seq);
 void net_set_udp_callback(udp_recv_callback_t cb);
 const arp_entry_t* net_arp_lookup(uint32_t ip);
 void net_get_config(uint32_t* ip, uint32_t* gateway, uint32_t* mask);
+
+/* ARP table access */
+const arp_entry_t* net_arp_table_get(int index);  /* returns NULL for invalid index */
+void net_arp_clear(void);
+
+/* Statistics */
+const net_stats_t* net_get_stats(void);
+void net_stats_reset(void);
 
 /* TCP API */
 void net_tcp_listen(uint16_t port);

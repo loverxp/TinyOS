@@ -3,6 +3,7 @@
 #include "../include/io.h"
 #include "../include/paging.h"
 #include "../include/stdio.h"
+#include "../include/debug.h"
 
 void exception_handler(uint32_t int_no, uint32_t err_code) {
     static const char* names[] = {
@@ -34,6 +35,10 @@ void exception_handler(uint32_t int_no, uint32_t err_code) {
 
     vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     printf("    System halted.\n");
+
+    /* Print call stack to serial for debugging */
+    kernel_backtrace();
+
     while (1) { asm volatile("cli; hlt"); }
 }
 

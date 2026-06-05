@@ -3,6 +3,7 @@ build/
 logs/
 *.o
 *.iso
+tinyos.bin
 
 # Tools (too large for git)
 tools/

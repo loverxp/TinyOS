@@ -30,6 +30,10 @@
 - **printf 增强**（支持 `%02x` `%04x` 等宽度和零填充修饰符）
 - **串口 Shell**（COM1 中断驱动收发，与 VGA 键盘双终端并行）
 - **RTC 实时时钟驱动**（CMOS，BCD/二进制自动检测，`date` 命令）
+- **PRNG**（xorshift32，`prng_seed`/`prng_next`/`prng_range`，`rand` 命令）
+- **调试框架**（`kprintf` 四级日志，内核异常栈回溯 `kernel_backtrace`）
+- **网络命令**（`arp` 显示/清空缓存，`netstat` 收发统计，`recv <port>` UDP 监听）
+- **Shell 输出优化**（ping/send 移除 `[1/4]` 调试噪声，仅显示关键状态）
 
 ---
 
@@ -46,11 +50,11 @@
   - 通过 QEMU `-s -S` 连接 GDB
   - 支持源码级断点调试
   - `.gdbinit` 配置脚本
-- [ ] **统一调试输出框架**
-  - 实现 `debug_printf()` 替代分散在各文件的 `serial_write`
+- [x] **统一调试输出框架**
+  - 实现 `kprintf()` 替代分散在各文件的 `serial_write`
   - 支持调试级别（ERROR/WARN/INFO/DEBUG）
   - 开关控制编译时是否包含调试输出
-- [ ] **内核异常回溯 (backtrace)**
+- [x] **内核异常回溯 (backtrace)**
   - 异常发生时打印栈回溯信息
   - 显示调用链（EIP + 函数名）
   - 辅助定位故障位置
@@ -65,12 +69,18 @@
 - [x] **鼠标驱动**
   - PS/2 鼠标支持（IRQ12）
   - 解析鼠标数据包（位移、按键）
-- [ ] **PCI 总线枚举**
+- [x] **PCI 总线枚举**
   - 扫描 PCI 配置空间
   - 发现并列出所有 PCI 设备
-- [ ] **PRNG (伪随机数生成器)**
-  - 实现 xorshift 或 LFSR 算法
-  - 为内核提供随机数服务
+- [x] **PRNG (伪随机数生成器)**
+  - xorshift32 算法实现 (`lib/prng.c`)
+  - `prng_seed()` / `prng_next()` / `prng_range()` 接口
+  - Shell 命令: `rand` 显示随机数
+- [x] **调试输出框架**
+  - `kprintf()` 支持 ERROR/WARN/INFO/DEBUG 四个级别 (`lib/debug.c`)
+  - 编译时可通过 `KLOG_LEVEL` 控制输出
+  - `KERROR()` / `KWARN()` / `KINFO()` / `KDBG()` 便捷宏
+  - 内核异常时自动打印调用栈回溯 (`kernel_backtrace()`)
 - [x] ~~**串口 Shell**~~（已完成）
   - 启用 COM1 串口 RX 中断
   - 串口字符回调 → Shell 输入处理（与键盘共享同一输入管道）
@@ -246,7 +256,7 @@ struct page_directory_entry {
 **目标**：命令行解释器
 
 - [x] 命令解析
-- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `ls`, `cat`, `diskinfo`, `pci`, `net`, `ping`, `send`
+- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `ls`, `cat`, `diskinfo`, `pci`, `net`, `ping`, `send`, `recv`, `arp`, `netstat`, `rand`
 - [ ] 程序执行：`fork` + `exec`
 - [ ] 管道支持：`cmd1 | cmd2`
 
@@ -316,10 +326,10 @@ struct page_directory_entry {
 
 ### 5.1a 网络功能增强（近期待办）
 
-- [ ] **UDP 接收命令** — 添加 `recv <port>` 命令，TinyOS 可监听 UDP 端口接收主机数据
-- [ ] **ARP 缓存管理** — 添加 `arp` 命令显示/清空 ARP 缓存表
-- [ ] **网络统计信息** — 添加 `netstat` 命令显示收发统计（发送/接收包数、错误数）
-- [ ] **Shell 命令输出优化** — 移除 ping/send 的 `[1/4]` 调试输出，仅在出错时显示诊断信息
+- [ ] **UDP 接收命令** — 添加 `recv <port>` 命令，TinyOS 可监听 UDP 端口接收主机数据 ✅ 已实现
+- [ ] **ARP 缓存管理** — 添加 `arp` 命令显示/清空 ARP 缓存表 ✅ 已实现
+- [ ] **网络统计信息** — 添加 `netstat` 命令显示收发统计（发送/接收包数、错误数） ✅ 已实现
+- [ ] **Shell 命令输出优化** — 移除 ping/send 的 `[1/4]` 调试输出，仅在出错时显示诊断信息 ✅ 已实现
 - [ ] **DHCP 客户端** — 自动获取 IP/网关/掩码，替代硬编码 10.0.2.15
 - [ ] **DNS 解析** — 支持域名到 IP 的解析（查询 10.0.2.3）
 - [x] **TCP 协议栈**
@@ -358,19 +368,107 @@ struct page_directory_entry {
 | DNS | 10.0.2.3 | QEMU 内置 DNS |
 | 主机 (host) | 10.0.2.2 | 通过网关访问 |
 
-**Windows 上接收 UDP 消息**（替代 netcat）：
+#### Shell 命令参考
+
+**`net` — 查看网络配置**
+```
+TinyOS> net
+Network config:
+  IP:      10.0.2.15
+  Gateway: 10.0.2.2
+  Mask:    255.255.255.0
+  MAC:     52:54:00:12:34:56
+```
+
+**`ping <ip>` — 发送 ICMP Echo 请求**
+```
+TinyOS> ping 10.0.2.2
+Pinging 10.0.2.2...
+Ping sent to 10.0.2.2
+```
+> 首次 ping 会自动发送 ARP 请求解析目标 MAC，后续 ping 使用缓存。
+
+**`send <ip> <port> <msg>` — 发送 UDP 数据包**
+```
+TinyOS> send 10.0.2.2 8888 Hello from TinyOS!
+Sent 18 bytes to 10.0.2.2:8888
+```
+
+**`recv <port>` — 监听 UDP 端口（5秒）**
+```
+TinyOS> recv 8888
+Listening on UDP port 8888 (5 seconds)...
+
+[UDP 10.0.2.2:12345 -> :8888] (16 bytes)
+Hello from host!
+
+Done listening on port 8888.
+```
+> 注意：必须使用 QEMU `hostfwd` 中配置的端口（当前为 8888）。监听其他端口需要先在 Makefile 中添加对应的 `hostfwd` 规则。
+
+**`arp` — 显示/清空 ARP 缓存**
+```
+TinyOS> arp
+ARP cache:
+  10.0.2.2 -> 52:56:00:00:00:02
+  10.0.2.3 -> 52:56:00:00:00:03
+
+TinyOS> arp -c
+ARP cache cleared.
+```
+
+**`netstat` — 显示网络统计**
+```
+TinyOS> netstat
+Network statistics:
+  RX packets: 42
+  TX packets: 38
+  RX errors:  0
+  TX errors:  0
+  ARP:  2 requests sent, 2 replies recv
+  ICMP: 3 sent, 2 recv
+  UDP:  1 sent, 1 recv
+  TCP:  12 sent, 8 recv
+```
+
+**`rand` — 生成随机数（xorshift32 PRNG）**
+```
+TinyOS> rand
+963418056
+```
+
+#### 双向通信示例
+
+**TinyOS → Windows（发送 UDP）**：
 ```powershell
-# PowerShell UDP 监听
+# Windows 上监听
 $udp = New-Object System.Net.Sockets.UdpClient(8888)
 $remote = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
 $data = $udp.Receive([ref]$remote)
 [System.Text.Encoding]::UTF8.GetString($data)
 $udp.Close()
 ```
-
-**TinyOS 端发送**：
 ```
+# TinyOS 端发送
 TinyOS> send 10.0.2.2 8888 Hello from TinyOS!
+```
+
+**Windows → TinyOS（发送 UDP）**：
+```
+# TinyOS 端监听
+TinyOS> recv 8888
+```
+```powershell
+# Windows 上发送（Python，因为 Windows 没有 netcat）
+python -c "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.sendto(b'Hello from host!', ('127.0.0.1', 8888)); s.close()"
+```
+
+#### 添加新端口转发
+
+若要使用其他端口，在 Makefile 的 `run`/`run-debug` 目标中添加 `hostfwd` 规则：
+```makefile
+# 示例：添加 UDP 9999 和 TCP 3000
+-netdev user,id=net0,hostfwd=tcp::8088-:80,hostfwd=udp::8888-:8888,hostfwd=udp::9999-:9999,hostfwd=tcp::3000-:3000
 ```
 
 ### 5.3 图形界面

@@ -50,7 +50,7 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, mm.c, except.c, loader.c, scheduler.c, wm.c, embedded_user.asm, user.asm, switch.asm）
 - `user/`: 用户程序（crt0.s, hello.c, user.ld, build.bat）
 - `drivers/`: 设备驱动（VGA、键盘、定时器、中断、GDT、串口、I/O、VBE、帧缓冲、鼠标）
-- `lib/`: 库函数（字符串处理、printf/sprintf 格式化输出）
+- `lib/`: 库函数（字符串处理、printf/sprintf 格式化输出、PRNG、调试框架）
 - `include/`: 头文件
 - `tools/`: 交叉编译工具链（已下载到本地）
 
@@ -70,7 +70,6 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - `kernel/pmm.c`: 物理内存管理器（位图分配）
 - `kernel/mm.c`: 堆内存分配器（kmalloc/kfree）
 - `lib/stdio.c`: printf/sprintf 格式化输出实现
-- `kernel/net.c`: 网络协议栈（ARP / IPv4 / ICMP / UDP）
 - `drivers/serial.c`: 串口驱动（COM1 中断收发、环形缓冲区、回调注册）
 - `include/serial.h`: 串口驱动接口定义
 - `drivers/ne2000.c`: NE2000 网卡驱动（PCI 发现、远程 DMA、环形缓冲区接收）
@@ -81,6 +80,9 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - `drivers/framebuf.c` / `include/framebuf.h`: 帧缓冲抽象层（putpixel、fillrect、字体渲染）
 - `drivers/mouse.c` / `include/mouse.h`: PS/2 鼠标驱动（IRQ12、数据包解析、事件回调）
 - `kernel/wm.c` / `include/window.h`: 窗口管理器（窗口创建/移动/关闭、Z-order、标题栏、鼠标事件）
+- `lib/prng.c` / `include/prng.h`: 伪随机数生成器 (xorshift32)
+- `lib/debug.c` / `include/debug.h`: 调试输出框架 (`kprintf` 四级日志、内核栈回溯)
+- `kernel/net.c`: 网络协议栈（ARP / IPv4 / ICMP / UDP / TCP），含 ARP 表访问 API 和网络统计
 
 ## 内存布局
 - 内核加载地址: 0x100000 (1MB)
@@ -119,6 +121,17 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - **分页映射 LFB**: 帧缓冲物理地址通常在 0xE0000000，大小约 800×600×4=1.92MB，需要分配页表并通过 `paging_map_page()` 逐页映射。identity mapping 以简化实现
 - **鼠标数据包**: PS/2 鼠标在 IRQ12 上发送 3 字节包 (状态+位移 X+位移 Y)，需同步检测 (byte[0] bit 3 必须为 1)，Y 方向取反（屏幕 Y 轴向下增长）
 - **窗口管理器渲染**: `wm_redraw()` 先绘制桌面背景，然后按 Z-order 绘制所有可见窗口（先绘制底层窗口）。窗口拖拽通过标题栏鼠标按下检测 + 位移计算实现，关闭按钮在标题栏右上角
+
+## 网络命令使用说明
+- **`recv <port>`**: 监听 UDP 端口 5 秒。注意只能监听 QEMU `hostfwd` 中配置的端口（默认 8888）。其他端口需先在 Makefile 添加 `hostfwd=udp::<port>-:<port>`
+- **`arp`** / **`arp -c`**: 显示或清空 ARP 缓存表
+- **`netstat`**: 显示网络收发统计（ARP/ICMP/UDP/TCP 各协议的发送/接收包数、错误数）
+- **`rand`**: 生成随机数（以 timer ticks 为种子的 xorshift32）
+- **`ping <ip>`** / **`send <ip> <port> <msg>`**: 发送 ICMP 或 UDP，首次会自动 ARP 解析
+- **Windows 发送 UDP 到 TinyOS**（Windows 无 netcat）:
+  ```powershell
+  python -c "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.sendto(b'Hello', ('127.0.0.1', 8888)); s.close()"
+  ```
 
 ## 已知问题（搁置）
 - **退出 GUI 后键盘可能无响应**: `cmd_gui` 退出流程中 `shell_char_callback` 重注册时机与键盘中断存在竞态，或 `enable_interrupts()` 前后 8042 状态不一致。临时绕过：使用串口终端
