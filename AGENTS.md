@@ -1,5 +1,18 @@
 # TinyOS 项目说明
 
+## 文档说明
+
+| 文档 | 内容 | 适用对象 |
+|------|------|---------|
+| [AGENTS.md](AGENTS.md) | 项目概况、构建命令、架构参考、注意事项 | AI 助手（本文件） |
+| [docs/USAGE.md](docs/USAGE.md) | **使用手册** — 所有 Shell 命令用法、测试方法、双向通信示例 | 用户/开发者 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构、内存布局、调用流程 | 架构参考 |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | 开发路线图、已完成功能、待办计划 | 项目管理 |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | **已修复** 的问题记录（含根因、修复方案） | 调试参考 |
+| [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) | **未修复** 的搁置问题清单（含临时绕过方案） | 开发记录 |
+
+> **编码完成后必须同步更新相关文档**。新增功能时更新 USAGE.md（用法）、ROADMAP.md（路线图）、ARCHITECTURE.md（架构）；修复 Bug 时更新 TROUBLESHOOTING.md（问题记录）；确认搁置时更新 KNOWN_ISSUES.md。
+
 ## 项目概述
 这是一个基于 C 语言的简单操作系统内核，可在 QEMU 模拟器上运行。
 
@@ -9,7 +22,7 @@
 - **NASM**: 汇编器，用于编译 .asm 文件
 - **i686-elf-gcc**: 交叉编译器，用于编译 C 代码
 - **i686-elf-ld**: 链接器
-- **QEMU**: 模拟器，位于 `D:\Program Files\qemu`
+- **QEMU**: 模拟器（需独立安装，路径配置见 Makefile）
 
 ### 构建命令
 
@@ -52,12 +65,12 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 
 ### 运行
 ```batch
-"D:\Program Files\qemu\qemu-system-i386.exe" -kernel build/tinyos.bin -m 32
+qemu-system-i386.exe -kernel build/tinyos.bin -m 32
 ```
 
 ## 项目结构
 - `boot/`: 启动代码
-- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, paging.c, mm.c, except.c, loader.c, scheduler.c, ipc.c, fat16.c, net.c, wm.c, webserver.c, embedded_user.asm, embedded_hello.asm, embedded_echo.asm, embedded_clear.asm, embedded_help.asm, embedded_forktest.asm, embedded_uptime.asm, embedded_date.asm, embedded_rand.asm, embedded_meminfo.asm, embedded_diskinfo.asm, user.asm, switch.asm）
+- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, paging.c, mm.c, except.c, loader.c, scheduler.c, ipc.c, fat16.c, net.c, wm.c, webserver.c, httpclient.c, embedded_user.asm, embedded_hello.asm, embedded_echo.asm, embedded_clear.asm, embedded_help.asm, embedded_forktest.asm, embedded_uptime.asm, embedded_date.asm, embedded_rand.asm, embedded_meminfo.asm, embedded_diskinfo.asm, user.asm, switch.asm）
 - `user/`: 用户程序与 libc（apps/echo.c, apps/clear.c, apps/help.c, apps/snake.c, apps/uptime.c, apps/date.c, apps/rand.c, apps/meminfo.c, apps/diskinfo.c, libc/stdio.c, libc/string.c, libc/stdlib.c, libc/syscall.h, crt0.s, user.ld, build.bat）
 - `drivers/`: 设备驱动（VGA、键盘、定时器、中断、GDT、串口、I/O、ATA、PCI、NE2000、VBE、帧缓冲、鼠标、内建字模、RTC）
 - `lib/`: 库函数（字符串处理、printf/sprintf 格式化输出、PRNG、调试框架）
@@ -147,23 +160,10 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - **窗口管理器渲染**: `wm_redraw()` 先绘制桌面背景，然后按 Z-order 绘制所有可见窗口（先绘制底层窗口）。窗口拖拽通过标题栏鼠标按下检测 + 位移计算实现，关闭按钮在标题栏右上角
 
 ## 网络命令使用说明
-- **`recv <port>`**: 监听 UDP 端口 5 秒。注意只能监听 QEMU `hostfwd` 中配置的端口（默认 8888）。其他端口需先在 Makefile 添加 `hostfwd=udp::<port>-:<port>`
-- **`tcp-recv <port>`**: 监听 TCP 端口 10 秒，显示接收到的 TCP 数据（不发送响应）
-- **`arp`** / **`arp -c`**: 显示或清空 ARP 缓存表
-- **`netstat`**: 显示网络收发统计（ARP/ICMP/UDP/TCP 各协议的发送/接收包数、错误数）
-- **`netstat -r`**: 重置网络统计计数器
-- **`dhcp`**: 发送 DHCP Discover/Offer/Request/ACK 四步协商，动态获取 IP/网关/掩码
-- **`rand`**: 生成随机数（以 timer ticks 为种子的 xorshift32）
-- **`ping <ip|hostname>`** / **`send <ip|hostname> <port> <msg>`**: 发送 ICMP 和 UDP，支持域名解析（DNS，通过 QEMU 内置 DNS 10.0.2.3:53）。首次发送会自动 ARP 解析
-- **`write <file> <text>`**: 创建或覆写文件到 FAT16 磁盘。文件名 8.3 格式，文本不支持引号。支持路径（如 `DIR/SUBDIR/FILE.TXT`）
-- **`rm <file>`**: 删除文件，释放 FAT 链和目录项。支持路径
-- **`mkdir <dir>`**: 创建子目录。支持路径（自动定位父目录）
-- **`rmdir <dir>`**: 删除空子目录。支持路径
-- **`ipctest`**: 运行 IPC 三阶段自动化测试（Pipe 管道 → MQ 消息队列 → SHM 共享内存），验证阻塞/唤醒机制和数据完整性
-- **Windows 发送 UDP 到 TinyOS**（Windows 无 netcat）:
-  ```powershell
-  python -c "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.sendto(b'Hello', ('127.0.0.1', 8888)); s.close()"
-  ```
+
+所有网络命令的详细用法和示例见 [docs/USAGE.md](docs/USAGE.md)，包括：`net`、`ping`、`send`、`recv`、`dhcp`、`arp`、`netstat`、`tcp-recv`、`http-get`、`webserver`。
+
+**QEMU 网络拓扑**：虚拟机 10.0.2.15 → 网关/DNS 10.0.2.2/10.0.2.3 → 宿主机（NAT）。使用 `hostfwd` 将宿主机端口转发到虚拟机。
 
 ## yield/sleep 系统调用
 - **Syscall 8**: `yield()` — 主动让出 CPU，触发 `need_reschedule=1`
@@ -216,33 +216,17 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - 用户程序退出（syscall 0）后恢复 VGA 文本模式和 shell
 
 ## 用户态命令列表
-以下用户程序已作为独立 Ring 3 ELF 嵌入内核，通过 `run_embedded_elf()` 加载执行：
 
-| 命令 | 功能 | 系统调用 | 源文件 |
-|------|------|----------|--------|
-| `hello` | 打印 "Hello from userspace!" | syscall 7 (printf) | [hello.c](file:///d:/Codes/Learning/TinyOS/user/apps/hello.c) |
-| `echo [text]` | 回显参数 | syscall 23 (get_cmdline) | [echo.c](file:///d:/Codes/Learning/TinyOS/user/apps/echo.c) |
-| `clear` | 清空 VGA 文本屏幕 | syscall 24 (clear_screen) | [clear.c](file:///d:/Codes/Learning/TinyOS/user/apps/clear.c) |
-| `help` | 显示命令帮助列表 | syscall 7 (printf) | [help.c](file:///d:/Codes/Learning/TinyOS/user/apps/help.c) |
-| `uptime` | 显示系统运行时间（秒.毫秒） | syscall 27 type=0 | [uptime.c](file:///d:/Codes/Learning/TinyOS/user/apps/uptime.c) |
-| `date` | 显示 RTC 日期时间 | syscall 27 type=1 | [date.c](file:///d:/Codes/Learning/TinyOS/user/apps/date.c) |
-| `rand` | 生成 xorshift32 随机数 | syscall 27 type=2 | [rand.c](file:///d:/Codes/Learning/TinyOS/user/apps/rand.c) |
-| `meminfo` | 显示物理内存使用情况 | syscall 27 type=3 | [meminfo.c](file:///d:/Codes/Learning/TinyOS/user/apps/meminfo.c) |
-| `diskinfo` | 显示 FAT16 磁盘信息 | syscall 27 type=4 | [diskinfo.c](file:///d:/Codes/Learning/TinyOS/user/apps/diskinfo.c) |
-| `forktest` | 测试 fork/exec/yield/exit 流程 | syscall 25/26/8/0 | [forktest.c](file:///d:/Codes/Learning/TinyOS/user/apps/forktest.c) |
-| `gfxsnake` | VGA Mode 13h 贪吃蛇游戏 | syscall 21/22/24 | [gfxsnake.c](file:///d:/Codes/Learning/TinyOS/user/apps/gfxsnake.c) |
+所有用户态命令的详细说明见 [docs/USAGE.md](docs/USAGE.md)。已作为独立 Ring 3 ELF 嵌入内核的命令：`hello`, `echo`, `clear`, `help`, `uptime`, `date`, `rand`, `meminfo`, `diskinfo`, `forktest`, `gfxsnake`。通过 `run_embedded_elf()` 加载执行，参数通过 `user_cmd_args` 缓冲区 + syscall 23 传递，系统信息通过 syscall 27 查询。
 
 ## IPC 进程间通信
-- **Pipe**（管道）: 512 字节环形缓冲区，最多 8 个。`pipe_create()` / `read()` / `write()` / `close()`。空时阻塞读者，满时阻塞写者
-- **Message Queue**（消息队列）: 8 槽 × 64 字节，最多 8 个。`mq_create()` / `send()` / `recv()` / `close()`。保持消息边界，FIFO 顺序
-- **Shared Memory**（共享内存）: 按名称查找，PMM 页分配。`shm_create(name, size)` / `shm_open(name)` / `shm_close(name)`。所有任务共享地址空间
+
+架构细节：
 - **阻塞机制**: `task_t` 扩展 `ipc_wait_obj`（等待对象指针）+ `ipc_wait_type`（1=读, 2=写）。`ipc_block()` 设 BLOCKED+halt，`ipc_wake()` 通过 `scheduler_wake_ipc()` 精确唤醒
 - **系统调用 10-20**: Pipe(10-13) / MQ(14-17) / SHM(18-20)，通过 int 0x80 调用
 - **Shell 命令**: `ipctest` — 三阶段自动化测试（Pipe → MQ → SHM），每阶段创建生产者/消费者任务验证
-- **DNS 解析**: `net_dns_query()` 通过 QEMU 内置 DNS (10.0.2.3:53) 进行 UDP DNS 查询。`ping` 和 `send` 命令支持域名参数。DNS 查询前自动 ARP 解析 DNS 服务器 MAC
-- **FAT16 子目录**: 通过 `fat16_resolve_path()` 支持路径解析，`fat16_mkdir()` 创建目录，`fat16_rmdir()` 删除空目录。`ls <path>` / `mkdir <dir>` / `rmdir <dir>` / `cat <path>` / `write <path>` / `rm <path>` 均支持路径
+- 详细用法见 [docs/USAGE.md](docs/USAGE.md)
 
-## 已知问题（搁置）
-- **退出 GUI 后键盘可能无响应**: `cmd_gui` 退出流程中 `shell_char_callback` 重注册时机与键盘中断存在竞态，或 `enable_interrupts()` 前后 8042 状态不一致。临时绕过：使用串口终端
-- **首次划入 QEMU 窗口鼠标位置不正确**: PS/2 鼠标初始化后的首个数据包包含异常位移值，导致光标瞬间跳到错误位置。后续恢复正常。可免方案：忽略前 N 个数据包
-- **schedtest `task_sleep` 唤醒未验证**: `task_sleep()` 设置 `state = TASK_BLOCKED` 后，`prepare_switch` 中的唤醒逻辑 (`now >= sleep_deadline` → `TASK_READY`) 在代码层面正确，但日志中 `wake_check` 始终显示 `wakes=0, delta=-9`（deadline 永远差 9 tick 到期），且无 `W!` / `[sched] Waking` 输出。旧版二进制（`task_sleep` 前）任务靠 busy-wait 运行，不真正阻塞，故无需唤醒。当前代码若任务真正 BLOCKED 且唤醒未触发，任务会永久卡死。**待验证**：手动删除 `logs/serial.log` 后重新 `make run-debug`
+## 已知问题
+
+搁置中的已知问题清单见 [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md)。

@@ -31,8 +31,9 @@
 3. 检查是否开启了中文输入法（建议切换到英文输入法）
 4. 尝试在命令行手动运行：
    ```batch
-   "D:\Program Files\qemu\qemu-system-i386.exe" -kernel build\tinyos.bin -m 32
+   qemu-system-i386.exe -kernel build\tinyos.bin -m 32
    ```
+   （QEMU 路径需在 `local_config.mk` 中配置）
 
 ## Shell 命令
 
@@ -379,7 +380,7 @@ TinyOS 有两种图形模式：
 - **NASM**: 汇编器，编译 .asm 文件
 - **i686-elf-gcc**: 交叉编译器，编译 C 代码
 - **i686-elf-ld**: 链接器
-- **QEMU**: 模拟器，位于 `D:\Program Files\qemu`
+- **QEMU**: 模拟器（路径在 `local_config.mk` 中配置）
 
 ### 构建命令
 

@@ -5,7 +5,14 @@ import os
 import socket
 import threading
 
-QEMU = r"D:\Program Files\qemu\qemu-system-i386.exe"
+# Load local config (create local_config.py from local_config.example.py)
+QEMU_PATH = ""
+try:
+    from local_config import QEMU_PATH, PROJECT_DIR
+except ImportError:
+    QEMU_PATH = os.environ.get("QEMU_PATH", "")
+    PROJECT_DIR = os.environ.get("PROJECT_DIR", "")
+
 KERNEL = "build/tinyos.bin"
 TCP_PORT = 14444
 
@@ -13,7 +20,7 @@ os.makedirs("logs", exist_ok=True)
 
 # Start QEMU with serial over TCP (telnet mode)
 qemu = subprocess.Popen(
-    [QEMU, "-kernel", KERNEL, "-m", "32",
+    [QEMU_PATH, "-kernel", KERNEL, "-m", "32",
      "-drive", "file=disk.img,format=raw,if=ide",
      "-netdev", "user,id=net0",
      "-device", "ne2k_pci,netdev=net0",
@@ -22,7 +29,7 @@ qemu = subprocess.Popen(
     stdin=subprocess.DEVNULL,
     stdout=subprocess.DEVNULL,
     stderr=subprocess.DEVNULL,
-    cwd="d:\\Codes\\Learning\\TinyOS"
+    cwd=PROJECT_DIR if PROJECT_DIR else None
 )
 
 print(f"[test] QEMU started, serial TCP on port {TCP_PORT}")

@@ -2,13 +2,16 @@
 # Supports incremental builds and user program building.
 
 # Tools (use full paths since they're not on PATH on Windows)
+# Set machine-specific paths in local_config.mk (see local_config.example.mk)
+-include local_config.mk
+
 CC   = tools/bin/i686-elf-gcc.exe
 AS   = nasm.exe
 LD   = tools/i686-elf-ld.exe
 ifeq (,$(wildcard $(LD)))
 LD   = tools/bin/i686-elf-ld.exe
 endif
-QEMU = "D:/Program Files/qemu/qemu-system-i386.exe"
+QEMU = "$(QEMU_PATH)"
 
 # User program tools
 USER_CC = $(CC)
@@ -32,7 +35,7 @@ BUILD = build
 C_SRCS    = kernel/kernel.c kernel/shell.c kernel/except.c kernel/gdt.c \
             kernel/tss.c kernel/pmm.c kernel/paging.c kernel/mm.c kernel/loader.c \
             kernel/scheduler.c kernel/ipc.c kernel/fat16.c kernel/net.c kernel/wm.c \
-            kernel/webserver.c \
+            kernel/webserver.c kernel/httpclient.c \
             drivers/vga.c drivers/keyboard.c drivers/timer.c drivers/interrupts.c \
             drivers/ata.c drivers/pci.c drivers/ne2000.c drivers/serial.c \
             drivers/vbe.c drivers/framebuf.c drivers/mouse.c drivers/builtin_font.c \

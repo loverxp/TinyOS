@@ -26,6 +26,7 @@
 #include "../include/rtc.h"
 #include "../include/prng.h"
 #include "../include/ipc.h"
+#include "../include/httpclient.h"
 
 #define LINE_BUF_SIZE 256
 
@@ -255,7 +256,7 @@ static const char* builtin_commands[] = {
     "schedtest","ipctest","ls","cat","mkdir","rmdir",
     "write","rm","diskinfo","pci","net","ping","send","recv",
     "arp","netstat","rand","dhcp","tcp-recv","webserver","date",
-    "snake","gfxsnake","gtest","gui","pageinfo", NULL
+    "snake","gfxsnake","gtest","gui","pageinfo","http-get", NULL
 };
 
 /* Forward declaration */
@@ -1197,6 +1198,11 @@ static void shell_handle_command(const char* cmd) {
                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         }
     } else if (strncmp(cmd, "ping ", 5) == 0) {
+        /* Release interrupt context (EOI + enable IRQs) so timer can advance
+         * and NIC interrupts can be received during DNS/ARP polling */
+        outb(0x20, 0x20);
+        enable_interrupts();
+
         const char* ipstr = cmd + 5;
         while (*ipstr == ' ') ipstr++;
         uint32_t a, b, c, d;
@@ -1209,6 +1215,7 @@ static void shell_handle_command(const char* cmd) {
             if (net_dns_query(ipstr, &target_ip) < 0) {
                 printf("Could not resolve: %s\n", ipstr);
                 printf("Usage: ping <ip> or ping <hostname>\n");
+                target_ip = 0;
             } else {
                 printf("Resolved %s -> %u.%u.%u.%u\n", ipstr,
                        target_ip & 0xFF, (target_ip >> 8) & 0xFF,
@@ -1246,6 +1253,10 @@ static void shell_handle_command(const char* cmd) {
             }
         }
     } else if (strncmp(cmd, "send ", 5) == 0) {
+        /* Release interrupt context (EOI + enable IRQs) for DNS/ARP polling */
+        outb(0x20, 0x20);
+        enable_interrupts();
+
         /* send <ip|hostname> <port> <msg> */
         const char* arg = cmd + 5;
         while (*arg == ' ') arg++;
@@ -1482,6 +1493,56 @@ static void shell_handle_command(const char* cmd) {
             printf("  Mask:    %u.%u.%u.%u\n", mask & 0xFF, (mask >> 8) & 0xFF, (mask >> 16) & 0xFF, (mask >> 24) & 0xFF);
         } else {
             printf("DHCP failed.\n");
+        }
+    } else if (strncmp(cmd, "http-get", 8) == 0) {
+        /* http-get <host> [port] [path]
+         * Default port: 80, default path: "/"
+         */
+        const char* arg = cmd + 8;
+        while (*arg == ' ') arg++;
+        if (*arg == '\0') {
+            printf("Usage: http-get <host> [port] [path]\n");
+            printf("  host: hostname or IP address\n");
+            printf("  port: TCP port (default 80)\n");
+            printf("  path: HTTP path (default /)\n");
+            printf("Example: http-get httpbin.org 80 /get\n");
+            return;
+        }
+        /* Extract host (up to next space) */
+        char host[128];
+        int hi = 0;
+        while (*arg && *arg != ' ' && hi < 127) {
+            host[hi++] = *arg++;
+        }
+        host[hi] = '\0';
+        while (*arg == ' ') arg++;
+
+        /* Parse optional port */
+        uint16_t port = 80;
+        if (*arg >= '0' && *arg <= '9') {
+            uint32_t p = 0;
+            while (*arg >= '0' && *arg <= '9') {
+                p = p * 10 + (*arg++ - '0');
+            }
+            if (p > 0 && p <= 65535) port = (uint16_t)p;
+            while (*arg == ' ') arg++;
+        }
+
+        /* Parse optional path */
+        const char* path = "/";
+        if (*arg == '/') {
+            path = arg;
+        }
+
+        /* Send EOI for keyboard IRQ1 since we run in shell handler */
+        outb(0x20, 0x20);
+        enable_interrupts();
+
+        int ret = http_get(host, port, path);
+        if (ret == 0) {
+            printf("[HTTP] GET request completed.\n");
+        } else {
+            printf("[HTTP] GET request failed.\n");
         }
     } else if (strncmp(cmd, "rm ", 3) == 0) {
         const char* fname = cmd + 3;

@@ -1107,3 +1107,102 @@ PS/2 鼠标在初始化后会发送一个或多个包含初始状态的基准数
 - 用户态 libc 的 `printf()` / `sprintf()` / `vsprintf()` 全部受影响
 - 内核态 lib 的 `printf()` / `sprintf()` 不受影响（已正确实现 `%u`）
 - 涉及命令：`uptime`、`date`、`rand`、`meminfo`、`diskinfo`
+
+---
+
+## 问题31：net.h 编译错误 - `#endif without #if`
+
+### 现象
+```
+In file included from kernel/kernel.c:18:
+kernel/../include/net.h:230:2: error: #endif without #if
+  230 | #endif /* NET_H */
+      |  ^~~~~
+```
+
+### 根本原因
+`include/net.h` 中存在一个**多余的 `#endif`**（位于原第 192 行），在 TCP API 声明后过早地关闭了头文件保护宏，导致 DHCP/DNS/Socket 等后续声明被排除在 `#ifndef NET_H` / `#define NET_H` 之外。当文件末尾的 `#endif /* NET_H */` 被解析时，因为没有匹配的 `#if` 而报错。
+
+这个多余的 `#endif` 是之前开发过程中残留的——可能是在添加 TCP 客户端连接 API（`net_tcp_connect`、`net_tcp_is_connected`）时，代码结构调整留下的产物。
+
+### 修复
+删除第 192 行多余的 `#endif`，使 `#ifndef NET_H` / `#define NET_H` 保护宏正确包裹整个文件。
+
+### 涉及文件
+- `include/net.h` — 删除第 192 行多余的 `#endif`
+
+---
+
+## 问题32：ping/send 使用主机名时全系统卡死
+
+### 现象
+```
+TinyOS> ping httpbin.org
+```
+没有任何输出，无法进行后续操作（键盘无响应、系统完全冻结）。`ping` 后接 IP 地址（如 `ping 10.0.2.2`）则正常工作。
+
+### 根本原因
+Shell 命令处理函数运行在**键盘 IRQ 中断上下文**中。CPU 进入中断处理程序后自动禁用中断（IF=0），这意味着：
+- 定时器中断（IRQ0）无法触发 → `timer_get_ticks()` 不会递增
+- 网卡中断无法触发 → `ne2000_poll_recv()` 收不到数据包
+
+`net_dns_query()` 内部用以下循环等待 DNS 响应：
+```c
+uint32_t deadline = timer_get_ticks() + 50; /* ~1 second */
+while (timer_get_ticks() < deadline) {
+    ne2000_poll_recv();
+    if (dns_rx_ready) { ... }
+    asm volatile("hlt");
+}
+```
+由于 IF=0，`hlt` 指令不会被任何外部中断唤醒，timer 不推进导致 `timer_get_ticks() < deadline` 永远为真，循环永不退出。
+
+`http-get` 命令正确处理了此问题（在阻塞等待前发送 EOI + 调用 `enable_interrupts()`），但 `ping` 和 `send` 命令未做同样处理。
+
+### 修复
+在 `kernel/shell.c` 的 `ping` 和 `send` 命令处理函数开头添加：
+```c
+outb(0x20, 0x20);   /* EOI — 通知 PIC 中断处理完毕 */
+enable_interrupts(); /* STI — 允许 CPU 接收后续中断 */
+```
+
+### 涉及文件
+- `kernel/shell.c` — ping/send 命令处理函数添加 EOI + enable_interrupts
+
+---
+
+## 问题33：www.baidu.com 等站点 DNS 解析失败
+
+### 现象
+```
+TinyOS> http-get www.baidu.com 80 /
+[HTTP] Resolving www.baidu.com...
+[HTTP] Could not resolve: www.baidu.com
+```
+而 `httpbin.org` 可以正常解析。
+
+### 根本原因
+DNS 解析器中的 Answer 记录遍历逻辑有缺陷：
+```c
+/* 遍历所有 Answer 记录（只取第一个 A 记录） */
+for (int a = 0; a < resp_ancount && a < 1; a++) {
+    ...
+    if (type == DNS_TYPE_A && rdlength == 4 && pos + 4 <= dns_rx_len) {
+        *out_ip = ...;
+        result = 0;
+    }
+    break;  /* ← 无论是否找到 A 记录，都只处理第一个 */
+}
+```
+循环条件中的 `&& a < 1` 和循环体末尾的 `break;` 导致解析器**只处理第一个 Answer 记录**。对于使用 CDN 的站点（如百度），DNS 响应中第一个 Answer 往往是 CNAME 记录（如 `www.baidu.com → www.a.shifen.com`），而不是 A 记录。遇到非 A 记录时解析器直接跳出，永远不会处理后续真正的 A 记录。
+
+### 修复
+- 移除 `&& a < 1` 限制，遍历所有 `resp_ancount` 个 Answer
+- 找到 A 记录时立即 `break` 返回 IP
+- 非 A 记录（CNAME 等）跳过 rdata 数据后 `continue` 进入下一轮
+
+### 涉及文件
+- `kernel/net.c` — 修改 `net_dns_query` 的 Answer 遍历循环逻辑
+
+### 经验教训
+> 编辑头文件时，需要确保 `#ifndef` / `#define` / `#endif` 三者的配对关系正确。如果在代码中插入或移动大段内容，建议在修改前后检查一次保护宏的完整性。增量构建只重新编译修改过的 `.c` 文件，但头文件的语法错误可能批量暴露在多个编译单元中。

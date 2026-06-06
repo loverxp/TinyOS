@@ -127,12 +127,14 @@ typedef struct {
 #define TCP_CLOSE_WAIT  3
 #define TCP_LAST_ACK    4
 #define TCP_CLOSED      5
+#define TCP_SYN_SENT    6  /* Client initiated connection, waiting for SYN-ACK */
 
 /* TCP connection entry */
 typedef struct {
     int      used;
     uint32_t ip;
     uint16_t port;
+    uint16_t src_port;      /* Local source port (for client connections) */
     uint32_t seq;           /* Next expected sequence number from peer */
     uint32_t ack_seq;       /* Next ack number we will send */
     int      state;
@@ -182,6 +184,9 @@ void net_stats_reset(void);
 /* TCP API */
 void net_tcp_listen(uint16_t port);
 void net_set_tcp_callback(tcp_recv_callback_t cb);
+tcp_recv_callback_t net_get_tcp_callback(void);  /* Save/restore callbacks */
+int  net_tcp_connect(uint32_t ip, uint16_t port);  /* Initiate client connection */
+int  net_tcp_is_connected(uint32_t ip, uint16_t port);
 int  net_tcp_send(uint32_t dst_ip, uint16_t dst_port,
                   const void* data, uint16_t len, uint8_t flags);
 int  net_tcp_close(uint32_t dst_ip, uint16_t dst_port);
@@ -192,6 +197,7 @@ int net_dhcp_discover(void);
 /* DNS */
 int net_dns_query(const char* hostname, uint32_t* out_ip);
 int net_is_valid_ip(const char* s);
+int net_parse_ip(const char* s, uint32_t* out_ip);
 
 /* Socket abstraction layer */
 #define SOCK_STREAM  1   /* TCP */

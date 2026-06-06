@@ -351,6 +351,7 @@ static tcp_conn_t* tcp_new_conn(uint32_t ip, uint16_t port) {
             tcp_conns[i].used = 1;
             tcp_conns[i].ip = ip;
             tcp_conns[i].port = port;
+            tcp_conns[i].src_port = 0;
             tcp_conns[i].state = TCP_LISTEN;
             return &tcp_conns[i];
         }
@@ -382,7 +383,7 @@ static void tcp_send_segment(tcp_conn_t* conn, uint32_t dst_ip, uint16_t dst_por
     /* Build TCP header */
     uint8_t* tcp_start = tx_frame + sizeof(eth_header_t) + 20;
     tcp_header_t* tcp = (tcp_header_t*)tcp_start;
-    tcp->src_port = htons(tcp_listen_port);
+    tcp->src_port = htons(conn->src_port ? conn->src_port : tcp_listen_port);
     tcp->dst_port = htons(dst_port);
     tcp->seq_num = htonl(seq);
     tcp->ack_num = htonl(ack);
@@ -418,6 +419,90 @@ void net_tcp_listen(uint16_t port) {
 
 void net_set_tcp_callback(tcp_recv_callback_t cb) {
     tcp_callback = cb;
+}
+
+tcp_recv_callback_t net_get_tcp_callback(void) {
+    return tcp_callback;
+}
+
+/* Ephemeral port allocator for client TCP connections */
+static uint16_t next_ephemeral_port = 40000;
+
+/**
+ * net_tcp_connect - Initiate an outbound TCP connection.
+ * 
+ * Creates a connection entry, assigns an ephemeral source port,
+ * and sends SYN to the target. After calling this, wait for the
+ * TCP stack to handle SYN-ACK and transition to TCP_ESTABLISHED.
+ * Then use net_tcp_send() to send data.
+ * 
+ * Returns: 0 on success, -1 on failure.
+ */
+int net_tcp_connect(uint32_t ip, uint16_t port) {
+    /* Check if connection already exists */
+    tcp_conn_t* conn = tcp_find_conn(ip, port);
+    if (conn && conn->state == TCP_SYN_SENT) {
+        /* Already connecting, just retry sending SYN */
+        goto retry_syn;
+    }
+    if (conn && conn->state == TCP_ESTABLISHED) {
+        serial_printf("[TCP] Already connected to %u.%u.%u.%u:%u\n",
+                      ip & 0xFF, (ip >> 8) & 0xFF,
+                      (ip >> 16) & 0xFF, (ip >> 24) & 0xFF, port);
+        return 0;
+    }
+
+    conn = tcp_new_conn(ip, port);
+    if (!conn) {
+        serial_printf("[TCP] Connect failed: connection table full\n");
+        return -1;
+    }
+
+    /* Assign ephemeral source port */
+    conn->src_port = next_ephemeral_port++;
+    if (next_ephemeral_port > 61000) next_ephemeral_port = 40000;
+
+    /* Initialize sequence numbers */
+    conn->seq = 0;          /* We haven't received anything yet */
+    conn->ack_seq = tcp_my_seq++;
+
+    conn->state = TCP_SYN_SENT;
+
+    serial_printf("[TCP] Connecting to %u.%u.%u.%u:%u (src_port=%u)\n",
+                  ip & 0xFF, (ip >> 8) & 0xFF,
+                  (ip >> 16) & 0xFF, (ip >> 24) & 0xFF,
+                  port, conn->src_port);
+
+retry_syn:
+    /* Send SYN to initiate handshake */
+    tcp_send_segment(conn, ip, port,
+                     conn->ack_seq, conn->seq,
+                     TCP_SYN, NULL, 0);
+
+    /* Retry SYN if ARP is still pending (poll for ARP response) */
+    for (int i = 0; i < 100; i++) {
+        uint32_t route_ip = resolve_dst(ip);
+        if (net_arp_lookup(route_ip)) {
+            tcp_send_segment(conn, ip, port,
+                             conn->ack_seq, conn->seq,
+                             TCP_SYN, NULL, 0);
+            break;
+        }
+        ne2000_poll_recv();
+        /* Small delay */
+        for (volatile int d = 0; d < 1000; d++);
+    }
+
+    return 0;
+}
+
+/**
+ * net_tcp_is_connected - Check if a TCP connection is established.
+ * Returns 1 if connected, 0 otherwise.
+ */
+int net_tcp_is_connected(uint32_t ip, uint16_t port) {
+    tcp_conn_t* conn = tcp_find_conn(ip, port);
+    return (conn && conn->state == TCP_ESTABLISHED) ? 1 : 0;
 }
 
 int net_tcp_send(uint32_t dst_ip, uint16_t dst_port,
@@ -472,8 +557,22 @@ static void handle_tcp(const uint8_t* data, uint16_t len, uint32_t src_ip) {
     uint16_t payload_len = (len >= header_len) ? len - header_len : 0;
     const uint8_t* payload = data + header_len;
 
-    /* Only handle packets to our listening port */
-    if (dst_port != tcp_listen_port) return;
+    /* Only handle packets to our listening port or active client connections */
+    int is_our_packet = (dst_port == tcp_listen_port);
+    if (!is_our_packet) {
+        /* Check if this packet is for an active client connection */
+        for (int i = 0; i < TCP_CONN_MAX; i++) {
+            if (tcp_conns[i].used && tcp_conns[i].src_port == dst_port) {
+                is_our_packet = 1;
+                /* Bind conn to this upstream if not already */
+                if (tcp_conns[i].port == 0) {
+                    tcp_conns[i].port = src_port;
+                }
+                break;
+            }
+        }
+    }
+    if (!is_our_packet) return;
 
     serial_printf("[TCP] recv: %u.%u.%u.%u:%u -> port %u flags=%s%s%s%s seq=%u ack=%u len=%u\n",
                   src_ip & 0xFF, (src_ip >> 8) & 0xFF,
@@ -487,6 +586,25 @@ static void handle_tcp(const uint8_t* data, uint16_t len, uint32_t src_ip) {
 
     /* Find or create connection */
     tcp_conn_t* conn = tcp_find_conn(src_ip, src_port);
+
+    /* Handle SYN-ACK for client-initiated connections */
+    if (conn && conn->state == TCP_SYN_SENT &&
+        (flags & TCP_SYN) && (flags & TCP_ACK)) {
+        /* Three-way handshake complete: our SYN was acknowledged */
+        conn->seq = seq + 1;          /* Next expected seq from server */
+        conn->ack_seq = ack;           /* Server's seq is our next ack */
+        serial_printf("[TCP] SYN-ACK received, sending final ACK (seq=%u, ack=%u)\n",
+                      conn->ack_seq, conn->seq);
+        tcp_send_segment(conn, src_ip, src_port,
+                         conn->ack_seq, conn->seq,
+                         TCP_ACK, NULL, 0);
+        conn->state = TCP_ESTABLISHED;
+        serial_printf("[TCP] Client connection established: %u.%u.%u.%u:%u\n",
+                      src_ip & 0xFF, (src_ip >> 8) & 0xFF,
+                      (src_ip >> 16) & 0xFF, (src_ip >> 24) & 0xFF,
+                      src_port);
+        return;
+    }
 
     if (flags & TCP_SYN) {
         /* New connection request */
@@ -1102,8 +1220,8 @@ int net_dns_query(const char* hostname, uint32_t* out_ip) {
             }
             pos += 4; /* skip QTYPE + QCLASS */
 
-            /* Process answer section (first A record only) */
-            for (int a = 0; a < resp_ancount && a < 1; a++) {
+            /* Process answer section — iterate all answers to handle CNAME chains */
+            for (int a = 0; a < resp_ancount; a++) {
                 while (pos < dns_rx_len) {
                     uint8_t len = dns_rx_buf[pos];
                     if (len == 0) { pos++; break; }
@@ -1128,8 +1246,12 @@ int net_dns_query(const char* hostname, uint32_t* out_ip) {
                                   hostname,
                                   *out_ip & 0xFF, (*out_ip >> 8) & 0xFF,
                                   (*out_ip >> 16) & 0xFF, (*out_ip >> 24) & 0xFF);
+                    break; /* Found A record, done */
                 }
-                break;
+
+                /* For non-A records (e.g. CNAME), skip over rdata and continue */
+                pos += rdlength;
+                if (pos > dns_rx_len) break;
             }
             break;
         }
@@ -1138,6 +1260,29 @@ int net_dns_query(const char* hostname, uint32_t* out_ip) {
 
     udp_callback = old_cb;
     return result;
+}
+
+/* Parse an IPv4 address string "A.B.C.D" into a uint32_t in host byte order.
+ * Returns 0 on success, -1 on failure. */
+int net_parse_ip(const char* s, uint32_t* out_ip) {
+    if (!s || !out_ip) return -1;
+    uint32_t octets[4] = {0, 0, 0, 0};
+    int octet_idx = 0;
+    while (*s && octet_idx < 4) {
+        if (*s >= '0' && *s <= '9') {
+            octets[octet_idx] = octets[octet_idx] * 10 + (*s - '0');
+        } else if (*s == '.') {
+            if (octets[octet_idx] > 255) return -1;
+            octet_idx++;
+        } else {
+            return -1;
+        }
+        s++;
+    }
+    if (octet_idx != 3) return -1;
+    if (octets[3] > 255) return -1;
+    *out_ip = IP4(octets[0], octets[1], octets[2], octets[3]);
+    return 0;
 }
 
 /* Check if a string is a valid IPv4 address (A.B.C.D) */

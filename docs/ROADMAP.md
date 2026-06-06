@@ -290,7 +290,7 @@ struct page_directory_entry {
 **目标**：命令行解释器
 
 - [x] 命令解析
-- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `hello`, `forktest`, `ls [path]`, `cat <path>`, `mkdir <path>`, `rmdir <path>`, `write <path>`, `rm <path>`, `diskinfo`, `pci`, `net`, `ping <ip|hostname>`, `send <ip|hostname>`, `recv`, `arp`, `netstat`, `rand`, `dhcp`, `tcp-recv`, `ipctest`
+- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `hello`, `forktest`, `ls [path]`, `cat <path>`, `mkdir <path>`, `rmdir <path>`, `write <path>`, `rm <path>`, `diskinfo`, `pci`, `net`, `ping <ip|hostname>`, `send <ip|hostname>`, `recv`, `arp`, `netstat`, `rand`, `dhcp`, `tcp-recv`, `http-get`, `ipctest`
   - 已迁移到 Ring 3 用户态：`help`, `clear`, `echo`, `hello`, `uptime`, `date`, `rand`, `meminfo`, `diskinfo` (通过 syscall 27 get_system_info 查询系统信息)
 - [x] 程序执行：`fork` (syscall 25) + `exec` (syscall 26)
 - [x] 管道支持：`cmd1 | cmd2`（基于 Pipe IPC + I/O 重定向）
@@ -321,7 +321,7 @@ struct page_directory_entry {
 - **`%u` 格式符缺失修复** (2025-06-06):
   - 问题：用户态 libc 的 `vsprintf()` 未实现 `%u` 格式说明符，`uptime`/`date`/`rand`/`meminfo`/`diskinfo` 等命令输出"一堆 u"
   - 原因：`switch` 语句中缺少 `case 'u'`，落到 `default` 分支原样输出 `u`；`%02u` 变成 `02u`
-  - 修复：在 [user/libc/stdio.c](file:///d:/Codes/Learning/TinyOS/user/libc/stdio.c#L66-L75) 中新增 `case 'u'` 分支，实现无符号整数格式化（类似 `%d`，去掉负数处理）
+  - 修复：在 [user/libc/stdio.c](user/libc/stdio.c) 中新增 `case 'u'` 分支，实现无符号整数格式化（类似 `%d`，去掉负数处理）
   - 影响范围：用户态 libc 的 printf/sprintf 系列函数均受益，内核态 lib （`lib/stdio.c`）此前已支持 `%u`
 
 ---
@@ -390,7 +390,7 @@ struct page_directory_entry {
   - `sock_create()` / `sock_bind()` / `sock_connect()` / `sock_send()` / `sock_recv()` / `sock_listen()` / `sock_close()`
   - 环形接收缓冲区（1024 bytes），超时接收（`sock_recv` with timeout_ms）
   - UDP 自动路由到对应 socket（按 local_port 匹配）
-- [ ] **HTTP 客户端** — 基于 TCP 实现 GET 请求，获取网页内容
+- [x] **HTTP 客户端** — 基于 TCP 实现 GET 请求，获取网页内容
 - [x] **Web 服务器** — 基于 TCP + HTTP 提供静态页面服务
   - 解析 HTTP 请求行（GET /path HTTP/1.1）
   - 返回 HTML 响应（状态行 + Content-Type）
@@ -517,6 +517,23 @@ Host: localhost
 Done listening on TCP port 80.
 ```
 > 与 `webserver` 命令类似，但仅显示接收到的数据，不发送响应。用于调试 TCP 连接。
+
+**`http-get <host> [port] [path]` — HTTP GET 请求客户端**
+```
+TinyOS> http-get httpbin.org 80 /get
+[HTTP] Resolving httpbin.org...
+[HTTP] Resolved httpbin.org -> 52.34.40.43
+[HTTP] Connecting to 52.34.40.43:80...
+[HTTP] Connected. Sending GET request...
+[HTTP] Response (1234 bytes):
+HTTP/1.1 200 OK
+Content-Type: application/json
+...
+[HTTP] GET request completed.
+```
+> 发送 HTTP/1.0 GET 请求到指定服务器的指定路径。默认端口 80，默认路径 `/`。
+> 支持主机名解析（DNS）和 IP 地址直接连接。
+> 详细用法和测试方法见 [docs/USAGE.md](docs/USAGE.md)。
 
 **`forktest` — 测试 fork/exec 系统调用**
 ```

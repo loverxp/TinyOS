@@ -1,1 +1,29 @@
+# Build outputs
+build/
+logs/
+*.o
+*.iso
+tinyos.bin
+
+# Tools (too large for git)
+tools/
+
+# NASM binary
+nasm.exe
+
+# Temporary files
+*.tmp
+*.log
+
+# IDE files
+.idea/
+
+# Generated disk image
+disk.img
+
+# Local machine config (contains personal paths, DO NOT commit)
+local_config.mk
+local_config.py
+
+# Windows reserved device name
 nul
