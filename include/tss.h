@@ -37,4 +37,11 @@ struct tss_entry {
 // Initialize TSS with kernel stack for Ring 0 entry
 void tss_init(uint32_t kernel_stack);
 
+// Update TSS.esp0 — called on every context switch so each task
+// has its own Ring 0 stack when entering from user mode (int 0x80).
+void tss_set_esp0(uint32_t esp0);
+
+// Get current TSS.esp0 value
+uint32_t tss_get_esp0(void);
+
 #endif

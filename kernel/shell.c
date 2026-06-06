@@ -29,6 +29,136 @@
 
 #define LINE_BUF_SIZE 256
 
+/* ── Shell Pipeline Support ───────────────────────────────────────────
+ * Parse '|' operator: cmd1 | cmd2 [ | cmd3 ... ]
+ * Creates pipes between adjacent commands, redirects stdout of each
+ * command to the next pipe, and sets stdin of each command from the
+ * previous pipe. Supports multi-segment pipelines.
+ */
+
+/* Forward declaration of the main command handler */
+static void shell_handle_command(const char* cmd);
+
+#define MAX_PIPE_SEGMENTS 8
+static int pipeline_pipe_id = -1;
+static int pipeline_depth = 0;  /* prevent recursive pipeline parsing */
+
+/* Callback for printf_pipe_redirect — writes formatted string to pipe */
+static void pipeline_printf_hook(const char* str, uint32_t len) {
+    if (pipeline_pipe_id >= 0) {
+        pipe_write(pipeline_pipe_id, str, len);
+    }
+}
+
+/* Find first occurrence of character c in string s, or NULL */
+static const char* str_find_char(const char* s, char c) {
+    if (!s) return NULL;
+    while (*s) {
+        if (*s == c) return s;
+        s++;
+    }
+    return NULL;
+}
+
+/* Handle a command pipeline: parses '|' and sets up pipe I/O redirection */
+static void handle_pipeline(const char* cmd) {
+    if (pipeline_depth > 0) return; /* prevent recursion */
+    pipeline_depth++;
+
+    /* Split command by '|' into segments */
+    char cmd_copy[256];
+    strncpy(cmd_copy, cmd, sizeof(cmd_copy) - 1);
+    cmd_copy[sizeof(cmd_copy) - 1] = '\0';
+
+    char* segments[MAX_PIPE_SEGMENTS];
+    int num_segs = 0;
+    segments[num_segs++] = cmd_copy;
+
+    char* p = cmd_copy;
+    while (*p && num_segs < MAX_PIPE_SEGMENTS) {
+        if (*p == '|') {
+            *p = '\0';
+            char* next = p + 1;
+            while (*next == ' ') next++;
+            segments[num_segs++] = next;
+        }
+        p++;
+    }
+
+    if (num_segs < 2) {
+        pipeline_depth--;
+        return;
+    }
+
+    /* Trim leading/trailing whitespace from each segment */
+    for (int i = 0; i < num_segs; i++) {
+        char* s = segments[i];
+        while (*s == ' ') s++;
+        segments[i] = s;
+        uint32_t len = strlen(s);
+        while (len > 0 && (s[len-1] == ' ' || s[len-1] == '\t')) {
+            s[--len] = '\0';
+        }
+    }
+
+    if (*segments[0] == '\0' || *segments[num_segs-1] == '\0') {
+        printf("Usage: cmd1 | cmd2 [ | cmd3 ... ]\n");
+        pipeline_depth--;
+        return;
+    }
+
+    /* Create pipes for each gap between segments */
+    int pipes[MAX_PIPE_SEGMENTS];
+    int num_pipes = num_segs - 1;
+    for (int i = 0; i < num_pipes; i++) {
+        pipes[i] = pipe_create();
+        if (pipes[i] < 0) {
+            printf("Pipeline error: could not create pipe\n");
+            for (int j = 0; j < i; j++) pipe_close(pipes[j]);
+            pipeline_depth--;
+            return;
+        }
+    }
+
+    /* ── Execute first segment: stdout → pipes[0] ── */
+    pipeline_pipe_id = pipes[0];
+    printf_pipe_redirect = pipeline_printf_hook;
+
+    shell_handle_command(segments[0]);
+
+    printf_pipe_redirect = NULL;
+    pipeline_pipe_id = -1;
+    pipe_shutdown_write(pipes[0]);
+
+    /* ── Execute middle segments: stdin ← pipes[i-1], stdout → pipes[i] ── */
+    for (int i = 1; i < num_segs - 1; i++) {
+        scheduler_set_stdin_pipe(pipes[i - 1]);
+
+        pipeline_pipe_id = pipes[i];
+        printf_pipe_redirect = pipeline_printf_hook;
+
+        shell_handle_command(segments[i]);
+
+        printf_pipe_redirect = NULL;
+        pipeline_pipe_id = -1;
+        pipe_shutdown_write(pipes[i]);
+    }
+
+    /* ── Execute last segment: stdin ← pipes[num_pipes-1], stdout → normal ── */
+    scheduler_set_stdin_pipe(pipes[num_pipes - 1]);
+
+    shell_handle_command(segments[num_segs - 1]);
+
+    scheduler_set_stdin_pipe(-1);
+
+    /* Cleanup all pipes */
+    for (int i = 0; i < num_pipes; i++) {
+        pipe_close(pipes[i]);
+    }
+
+    pipeline_depth--;
+}
+
 static char line_buffer[LINE_BUF_SIZE];
 static size_t line_pos = 0;
 
@@ -39,8 +169,6 @@ static void shell_prompt(void) {
     vga_writestring("TinyOS> ");
     serial_writestring("TinyOS> ");
 }
-
-static void shell_handle_command(const char* cmd);
 
 /* UDP recv callback for the 'recv' command — prints received data to screen */
 static void shell_udp_recv_cb(uint32_t src_ip, uint16_t src_port,
@@ -722,6 +850,12 @@ static void shell_handle_command(const char* cmd) {
 
     if (*cmd == '\0') return;
 
+    // Check for pipe operator — handle as pipeline
+    if (pipeline_depth == 0 && str_find_char(cmd, '|')) {
+        handle_pipeline(cmd);
+        return;
+    }
+
     if (strcmp(cmd, "help") == 0) {
         /* Run help as a user program */
         run_help_user();
@@ -795,6 +929,8 @@ static void shell_handle_command(const char* cmd) {
     } else if (strcmp(cmd, "testuser") == 0) {
         extern void test_user_mode(void);
         test_user_mode();
+    } else if (strcmp(cmd, "forktest") == 0) {
+        run_forktest_user();
     } else if (strcmp(cmd, "hello") == 0) {
         run_hello_user();
     } else if (strncmp(cmd, "schedtest", 9) == 0) {
@@ -1069,7 +1205,7 @@ static void shell_handle_command(const char* cmd) {
         prng_seed(timer_get_ticks());
         printf("%u\n", prng_next());
     } else if (strncmp(cmd, "write ", 6) == 0) {
-        /* write <file> <text> */
+        /* write <file> [text] — if text omitted, read from stdin_pipe (pipeline) */
         const char* arg = cmd + 6;
         while (*arg == ' ') arg++;
         const char* fname = arg;
@@ -1086,7 +1222,29 @@ static void shell_handle_command(const char* cmd) {
         /* skip to text */
         while (*arg == ' ') arg++;
         if (*arg == '\0') {
-            printf("Usage: write <file> <text>\n");
+            /* No text argument — try reading from stdin pipe (pipeline) */
+            task_t* cur = scheduler_get_current();
+            if (cur && cur->stdin_pipe >= 0) {
+                char pipe_buf[1024];
+                uint32_t total = 0;
+                int n;
+                while (total < sizeof(pipe_buf) - 1 &&
+                       (n = pipe_read(cur->stdin_pipe, pipe_buf + total, sizeof(pipe_buf) - 1 - total)) > 0) {
+                    total += n;
+                }
+                pipe_buf[total] = '\0';
+                if (total > 0) {
+                    if (fat16_write(fname_buf, pipe_buf, total) == 0) {
+                        printf("Wrote %u bytes to %s\n", total, fname_buf);
+                    } else {
+                        printf("Failed to write %s\n", fname_buf);
+                    }
+                } else {
+                    printf("No data to write\n");
+                }
+            } else {
+                printf("Usage: write <file> <text>\n");
+            }
             return;
         }
         uint32_t text_len = strlen(arg);

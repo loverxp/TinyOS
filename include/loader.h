@@ -18,4 +18,7 @@ void run_clear_user(void);
 // Load and run the help user program
 void run_help_user(void);
 
+// Load and run the forktest user program (tests fork syscall)
+void run_forktest_user(void);
+
 #endif // LOADER_H

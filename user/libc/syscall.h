@@ -67,4 +67,21 @@ static inline void clear_screen(void) {
     asm volatile("mov $24, %%eax; int $0x80" : : : "eax", "memory");
 }
 
+/* Fork the current process — returns 0 in child, child PID in parent */
+static inline int fork(void) {
+    uint32_t result;
+    asm volatile("mov $25, %%eax; int $0x80"
+        : "=a"(result) : : "ebx", "ecx", "memory");
+    return (int)result;
+}
+
+/* Replace the current user program.
+ * entry = new EIP, user_esp = new user stack top.
+ * Does NOT return on success.
+ */
+static inline void exec(uint32_t entry, uint32_t user_esp) {
+    asm volatile("mov $26, %%eax; mov %0, %%ebx; mov %1, %%ecx; int $0x80"
+        : : "r"(entry), "r"(user_esp) : "eax", "ebx", "ecx", "memory");
+}
+
 #endif /* SYSCALL_H */

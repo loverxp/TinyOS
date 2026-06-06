@@ -7,6 +7,9 @@
 // Internal buffer for formatting
 #define PRINTF_BUF_SIZE 1024
 
+/* Hook for redirecting printf output (e.g. to a pipe for shell pipelines) */
+printf_pipe_hook_t printf_pipe_redirect = NULL;
+
 // Helper: convert unsigned int to string
 static char* uitoa_str(unsigned int value, char* str, int base) {
     char* ptr = str;
@@ -211,8 +214,14 @@ void printf(const char* fmt, ...) {
     __builtin_va_start(args, fmt);
     vsprintf_internal(buf, fmt, args);
     __builtin_va_end(args);
-    vga_writestring(buf);
-    serial_writestring(buf);
+    if (printf_pipe_redirect) {
+        uint32_t len = 0;
+        while (buf[len]) len++;
+        printf_pipe_redirect(buf, len);
+    } else {
+        vga_writestring(buf);
+        serial_writestring(buf);
+    }
 }
 
 // Print a single character

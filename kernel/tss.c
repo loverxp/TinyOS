@@ -19,3 +19,11 @@ void tss_init(uint32_t kernel_stack) {
     // Register TSS in GDT
     gdt_set_tss((uint32_t)&tss, sizeof(struct tss_entry) - 1);
 }
+
+void tss_set_esp0(uint32_t esp0) {
+    tss.esp0 = esp0;
+}
+
+uint32_t tss_get_esp0(void) {
+    return tss.esp0;
+}

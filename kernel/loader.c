@@ -32,6 +32,10 @@ extern uint8_t embedded_clear_end[];
 extern uint8_t embedded_help_start[];
 extern uint8_t embedded_help_end[];
 
+// Embedded forktest binary (from embedded_forktest.asm)
+extern uint8_t embedded_forktest_start[];
+extern uint8_t embedded_forktest_end[];
+
 // External assembly functions
 extern void vga_initialize(void);
 extern void vga_set_color(enum vga_color fg, enum vga_color bg);
@@ -295,4 +299,8 @@ void run_clear_user(void) {
 
 void run_help_user(void) {
     run_embedded_elf("help.elf", embedded_help_start, embedded_help_end);
+}
+
+void run_forktest_user(void) {
+    run_embedded_elf("forktest.elf", embedded_forktest_start, embedded_forktest_end);
 }

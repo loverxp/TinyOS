@@ -46,6 +46,7 @@ int   pipe_create(void);
 int   pipe_read(int id, void* buf, uint32_t max_len);
 int   pipe_write(int id, const void* data, uint32_t len);
 void  pipe_close(int id);
+void  pipe_shutdown_write(int id);  /* Close write end only — readers see EOF but pipe remains usable */
 
 int   mq_create(void);
 int   mq_send(int id, const void* data, uint32_t len);

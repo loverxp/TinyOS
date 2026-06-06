@@ -24,6 +24,10 @@
 extern void run_user_task(void (*entry)(void));
 extern void user_main(void);
 
+// Dedicated kernel stack for TSS Ring 3 → Ring 0 transitions
+// Used by the idle task and as fallback when per-task stacks are not set up.
+uint8_t tss_kernel_stack[4096] __attribute__((aligned(16)));
+
 // Test user mode switching from kernel
 void test_user_mode(void) {
     printf("Switching to Ring 3 (user mode)...\n");
@@ -95,8 +99,7 @@ void kernel_main(uint32_t multiboot_info_addr) {
     serial_writestring("[OK] Paging\n");
 
     // Initialize TSS for Ring 3 -> Ring 0 transitions
-    // Allocate a dedicated 4KB kernel stack for TSS
-    static uint8_t tss_kernel_stack[4096] __attribute__((aligned(16)));
+    // Uses the global tss_kernel_stack declared above
     tss_init((uint32_t)tss_kernel_stack + 4096);
     printf("[OK] TSS initialized\n");
     serial_writestring("[OK] TSS\n");

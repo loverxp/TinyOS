@@ -24,6 +24,9 @@ typedef struct task {
     uint32_t sleep_deadline;  /* timer tick at which to wake (0 = not sleeping) */
     void*    ipc_wait_obj;    /* pointer to pipe/mqueue waiting on (NULL = not waiting) */
     uint8_t  ipc_wait_type;   /* 0=none, 1=wait-for-read, 2=wait-for-write */
+    int      stdout_pipe;     /* -1 = normal VGA output, else pipe_id for output */
+    int      stdin_pipe;      /* -1 = normal keyboard input, else pipe_id for input */
+    uint8_t  is_forked;       /* 1 = created by fork(), should call task_exit() on exit */
     struct task* next;
 } task_t;
 
@@ -40,5 +43,17 @@ void task_yield(void);          /* Voluntarily give up CPU */
 void task_sleep(uint32_t ms);   /* Sleep for N milliseconds */
 task_t* scheduler_get_current(void);
 void scheduler_wake_ipc(void* obj, uint8_t wait_type);
+
+/* Fork the current task — clones kernel stack and TCB.
+ * Called from syscall handler with the register frame pointer.
+ * Returns child PID on success, -1 on failure.
+ */
+int task_fork(uint32_t* regs);
+
+/* Redirect the current task's stdout to a pipe (-1 = normal VGA) */
+void scheduler_set_stdout_pipe(int pipe_id);
+
+/* Redirect the current task's stdin from a pipe (-1 = normal keyboard) */
+void scheduler_set_stdin_pipe(int pipe_id);
 
 #endif // SCHEDULER_H

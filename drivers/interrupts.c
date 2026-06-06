@@ -3,6 +3,12 @@
 #include "../include/vga.h"
 #include "../include/string.h"
 #include "../include/except.h"
+#include "../include/scheduler.h"
+#include "../include/ipc.h"
+
+// External user-mode exit handlers (defined in user.asm)
+extern void forked_task_exit_handler(void);
+extern void user_exit_handler(void);
 
 struct idt_entry {
     uint16_t base_low;
@@ -253,6 +259,7 @@ extern char keyboard_getchar(void);
 extern void keyboard_clear_buffer(void);
 extern void task_yield(void);
 extern void task_sleep(uint32_t ms);
+extern int task_fork(uint32_t* regs);
 extern int pipe_create(void);
 extern int pipe_read(int id, void* buf, uint32_t max_len);
 extern int pipe_write(int id, const void* data, uint32_t len);
@@ -597,17 +604,31 @@ void syscall_handler(uint32_t* regs) {
 
     if (syscall_no == 0) {
         // Syscall 0: exit user mode, return to kernel
-        // CRITICAL: Switch back to text mode NOW while still in Ring 0,
-        // before the VGA memory is accessed by vga_writestring or other code.
+        task_t* cur_task = scheduler_get_current();
+
+        // Forked tasks should terminate properly via task_exit()
+        if (cur_task && cur_task->is_forked) {
+            serial_string("[DBG:SYS0] forked task '");
+            serial_string(cur_task->name);
+            serial_string("' exited, code=");
+            serial_hex(arg1);
+            serial_string("\r\n");
+
+            // Return to kernel mode at forked_task_exit_handler which calls task_exit()
+            regs[11] = (uint32_t)forked_task_exit_handler;  // EIP
+            regs[12] = 0x08;                                  // CS = kernel code (RPL=0)
+            return;
+        }
+
+        // Root task: switch back to text mode and return to kernel
         vga_set_mode03h();
-        
+
         serial_string("[DBG:SYS0] user_exit called, code=");
         serial_hex(arg1);
         serial_string("\r\n");
         vga_writestring("\n*** Return to kernel mode ***\n\n");
 
         // Modify the saved IRET frame to return to kernel code
-        // Same-privilege IRET (CS.RPL=0 == CPL=0) will pop EIP, CS, EFLAGS
         regs[11] = (uint32_t)user_exit_handler;  // EIP
         regs[12] = 0x08;                          // CS = kernel code (RPL=0)
         return;
@@ -666,8 +687,16 @@ void syscall_handler(uint32_t* regs) {
 
     if (syscall_no == 7) {
         // Syscall 7: write string to VGA console (arg1 = string pointer)
+        // If current task has stdout_pipe, redirect to pipe instead
         const char* s = (const char*)arg1;
-        if (s) vga_writestring(s);
+        if (s) {
+            task_t* cur = scheduler_get_current();
+            if (cur && cur->stdout_pipe >= 0) {
+                pipe_write(cur->stdout_pipe, s, strlen(s));
+            } else {
+                vga_writestring(s);
+            }
+        }
         return;
     }
 
@@ -680,6 +709,32 @@ void syscall_handler(uint32_t* regs) {
     if (syscall_no == 9) {
         // Syscall 9: sleep for N milliseconds (arg1 = ms)
         task_sleep(arg1);
+        return;
+    }
+
+    if (syscall_no == 25) {
+        // Syscall 25: fork() - clone the current task
+        // Returns child PID in parent, 0 in child
+        regs[8] = (uint32_t)task_fork(regs);
+        return;
+    }
+
+    if (syscall_no == 26) {
+        // Syscall 26: exec(entry, user_esp) - replace user program
+        // arg1 = new entry point (EIP)
+        // arg2 = new user stack pointer (ESP)
+        regs[8] = 0;            // EAX = 0 (success)
+        regs[11] = arg1;        // EIP = entry point
+        regs[13] = 0x3200;      // EFLAGS: IF=1, IOPL=3
+        regs[14] = arg2;        // user ESP
+        // Clear other user registers
+        regs[1] = 0;  // EDI
+        regs[2] = 0;  // ESI
+        regs[3] = 0;  // EBP
+        regs[4] = 0;  // ESP (saved by pusha)
+        regs[5] = 0;  // EBX
+        regs[6] = 0;  // EDX
+        regs[7] = 0;  // ECX
         return;
     }
 
@@ -732,7 +787,18 @@ void syscall_handler(uint32_t* regs) {
 
     if (syscall_no == 21) {
         // Syscall 21: getchar() - blocking read character
-        regs[8] = (uint32_t)(unsigned char)keyboard_getchar();
+        // If stdin_pipe is set, read from pipe instead of keyboard
+        task_t* cur = scheduler_get_current();
+        if (cur && cur->stdin_pipe >= 0) {
+            char c;
+            if (pipe_read(cur->stdin_pipe, &c, 1) == 1) {
+                regs[8] = (uint32_t)(unsigned char)c;
+            } else {
+                regs[8] = 0;  // EOF
+            }
+        } else {
+            regs[8] = (uint32_t)(unsigned char)keyboard_getchar();
+        }
         return;
     }
 
@@ -742,22 +808,39 @@ void syscall_handler(uint32_t* regs) {
         char* buf = (char*)arg1;
         int max = (int)arg2;
         int pos = 0;
-        while (pos < max - 1) {
-            char c = keyboard_getchar();
-            if (c == '\b') {
-                if (pos > 0) { pos--; }
-                continue;
+
+        task_t* cur = scheduler_get_current();
+        if (cur && cur->stdin_pipe >= 0) {
+            /* Read from pipe until newline or max */
+            while (pos < max - 1) {
+                char c;
+                if (pipe_read(cur->stdin_pipe, &c, 1) != 1) break;
+                if (c == '\n' || c == '\r') {
+                    buf[pos] = '\0';
+                    break;
+                }
+                if (c >= 32) buf[pos++] = c;
             }
-            if (c == '\n' || c == '\r') {
-                buf[pos] = '\0';
-                break;
+            buf[pos] = '\0';
+            regs[8] = (uint32_t)pos;
+        } else {
+            while (pos < max - 1) {
+                char c = keyboard_getchar();
+                if (c == '\b') {
+                    if (pos > 0) { pos--; }
+                    continue;
+                }
+                if (c == '\n' || c == '\r') {
+                    buf[pos] = '\0';
+                    break;
+                }
+                if (c >= 32) {
+                    buf[pos++] = c;
+                }
             }
-            if (c >= 32) {
-                buf[pos++] = c;
-            }
+            buf[pos] = '\0';
+            regs[8] = (uint32_t)pos;
         }
-        buf[pos] = '\0';
-        regs[8] = (uint32_t)pos;
         return;
     }
 

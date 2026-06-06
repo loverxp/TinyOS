@@ -39,7 +39,10 @@
 - **DHCP 客户端**（Discover/Offer/Request/ACK 四步协商，`dhcp` 命令，动态获取 IP/网关/掩码）
 - **TCP 监听命令**（`tcp-recv <port>` 10秒监听，显示接收数据）
 - **Socket 抽象层**（`sock_create`/`bind`/`connect`/`send`/`recv`/`listen`/`close`，UDP+TCP 统一接口，环形接收缓冲区）
-- **进程间通信 (IPC)**（Pipe 字节流管道、Message Queue 消息队列、Shared Memory 共享内存，`ipctest` 命令验证，syscall 10-20）
+- [x] **进程间通信 (IPC)**（Pipe 字节流管道、Message Queue 消息队列、Shared Memory 共享内存，`ipctest` 命令验证，syscall 10-20）
+- [x] **fork/exec 系统调用**（syscall 25 fork / syscall 26 exec，TCB 扩展 `is_forked` 标志，fork 时克隆内核栈和用户栈，exec 替换当前进程映像）
+- [x] **Shell 管道**（`cmd1 | cmd2` 解析与执行，通过 Pipe 重定向子进程 stdin/stdout）
+- [x] **forktest 用户程序**（验证 fork/exec/yield/exit 流程）
 
 ---
 
@@ -286,9 +289,12 @@ struct page_directory_entry {
 **目标**：命令行解释器
 
 - [x] 命令解析
-- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `hello`, `ls [path]`, `cat <path>`, `mkdir <path>`, `rmdir <path>`, `write <path>`, `rm <path>`, `diskinfo`, `pci`, `net`, `ping <ip|hostname>`, `send <ip|hostname>`, `recv`, `arp`, `netstat`, `rand`, `dhcp`, `tcp-recv`, `ipctest`
-- [ ] 程序执行：`fork` + `exec`
-- [ ] 管道支持：`cmd1 | cmd2`
+- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `hello`, `forktest`, `ls [path]`, `cat <path>`, `mkdir <path>`, `rmdir <path>`, `write <path>`, `rm <path>`, `diskinfo`, `pci`, `net`, `ping <ip|hostname>`, `send <ip|hostname>`, `recv`, `arp`, `netstat`, `rand`, `dhcp`, `tcp-recv`, `ipctest`
+- [x] 程序执行：`fork` (syscall 25) + `exec` (syscall 26)
+- [x] 管道支持：`cmd1 | cmd2`（基于 Pipe IPC + I/O 重定向）
+  - Shell 解析 `|` 分隔的多条命令
+  - 为每条命令创建子进程，通过 pipe 连接 stdin/stdout
+  - `forktest` 用户程序验证 fork/exec/yield/exit 流程
 
 ### 4.3 用户态标准库 (libc)
 **目标**：提供基础 C 运行时，用户程序无需关心内核细节
@@ -501,6 +507,22 @@ Done listening on TCP port 80.
 ```
 > 与 `webserver` 命令类似，但仅显示接收到的数据，不发送响应。用于调试 TCP 连接。
 
+**`forktest` — 测试 fork/exec 系统调用**
+```
+TinyOS> forktest
+ForkTest: before fork...
+PARENT: child PID=2
+PARENT: yielding...
+CHILD: fork=0, running!
+CHILD: yielding...
+PARENT: back from yield!
+CHILD: back from yield!
+PARENT: exiting.
+CHILD: exiting.
+```
+> 创建子进程验证 fork (syscall 25)、yield (syscall 8) 和 task_exit 流程。
+> **注意**: 当前版本中，子进程退出后 idle 任务可能触发 Page Fault（见已知问题）。
+
 **`write <file> <text>` — 写文件到 FAT16 磁盘**
 ```
 TinyOS> write note.txt Hello World!
@@ -582,6 +604,11 @@ python -c "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.s
 #### 已知问题
 - **退出 GUI 后键盘可能无响应**: 从 `cmd_gui` 的清零代码返回到 Shell 后，偶尔键盘输入不被处理。推测原因：`shell_char_callback` 重注册时机与键盘中断存在竞态，或 `enable_interrupts()` 前后键盘控制器状态不一致
 - **首次划入 QEMU 窗口鼠标位置不正确**: QEMU 窗口激活后，PS/2 鼠标的第一个数据包中的位移值异常（可能包含累积的初始状态），导致光标瞬间跳到错误位置。后续移动恢复正常
+- **fork/exec 后 idle 任务崩溃**（搁置）: 在 `forktest` 中，子进程通过 `task_exit()` 正确退出后，调度器切回 idle 任务时触发 Page Fault（错误地址 0xe987f4）和 Invalid Opcode 异常。已采取以下措施但仍未完全解决：
+  - `scheduler_pick_next()` 扩展为同时考虑 `TASK_READY` 和 `TASK_RUNNING` 状态，确保 idle 任务能被选中
+  - `prepare_switch()` 中为 idle 任务重置 `TSS.esp0` 到专用内核栈，避免使用已释放的子进程栈
+  - `task_exit()` 切换到紧急安全栈 (`exit_safe_stack`) 后再 halt，防止 IRQ 处理程序使用已释放的内存
+  - 根本原因推测：子进程内核栈释放后，残留的 IRQ 上下文引用导致页面错误
 
 ### 5.4 高级功能
 

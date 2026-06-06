@@ -87,6 +87,29 @@ user_exit_handler:
     ret
 
 ; ------------------------------------------------------------------
+; forked_task_exit_handler - Called by syscall 0 for forked tasks.
+;                            Calls task_exit() to properly terminate
+;                            without going through the parent's
+;                            saved_kernel_esp path.
+; ------------------------------------------------------------------
+extern task_exit
+global forked_task_exit_handler
+forked_task_exit_handler:
+    ; Restore kernel data segments
+    mov ax, 0x10            ; GDT_KERNEL_DATA
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+    ; Forked tasks should terminate, not return to parent's context
+    call task_exit
+    ; task_exit does not return, but safety loop just in case:
+.loop:
+    hlt
+    jmp .loop
+
+; ------------------------------------------------------------------
 ; user_main - User test program, runs in Ring 3
 ; ------------------------------------------------------------------
 global user_main

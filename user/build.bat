@@ -91,4 +91,16 @@ echo Converting: help.bin
 %OBJCOPY% -O binary %OUT%\help.elf %OUT%\help.bin
 if errorlevel 1 exit /b 1
 
-echo Done: hello.bin, gfxsnake.bin, echo.bin, clear.bin, help.bin
+echo Building user: forktest
+%GCC% %CFLAGS% -c apps\forktest.c -o %OUT%\forktest.o
+if errorlevel 1 exit /b 1
+
+echo Linking: forktest.elf
+%LD% %LDFLAGS% -o %OUT%\forktest.elf %OUT%\forktest.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: forktest.bin
+%OBJCOPY% -O binary %OUT%\forktest.elf %OUT%\forktest.bin
+if errorlevel 1 exit /b 1
+
+echo Done: hello.bin, gfxsnake.bin, echo.bin, clear.bin, help.bin, forktest.bin

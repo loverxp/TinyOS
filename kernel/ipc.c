@@ -104,6 +104,14 @@ void pipe_close(int id) {
     pipes[id].in_use = 0;
 }
 
+/* Close write end: marks pipe as closed but keeps in_use=1 so readers
+ * can drain remaining data and get EOF (0). Full cleanup with pipe_close(). */
+void pipe_shutdown_write(int id) {
+    if (id < 0 || id >= MAX_PIPES || !pipes[id].in_use) return;
+    pipes[id].closed = 1;
+    ipc_wake(&pipes[id], IPC_WAIT_READ);
+}
+
 /* ---- Message Queue ---- */
 
 int mq_create(void) {
