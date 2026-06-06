@@ -55,4 +55,40 @@ echo Converting: gfxsnake.bin
 %OBJCOPY% -O binary %OUT%\gfxsnake.elf %OUT%\gfxsnake.bin
 if errorlevel 1 exit /b 1
 
-echo Done: hello.bin, gfxsnake.bin
+echo Building user: echo
+%GCC% %CFLAGS% -c apps\echo.c -o %OUT%\echo.o
+if errorlevel 1 exit /b 1
+
+echo Linking: echo.elf
+%LD% %LDFLAGS% -o %OUT%\echo.elf %OUT%\echo.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: echo.bin
+%OBJCOPY% -O binary %OUT%\echo.elf %OUT%\echo.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: clear
+%GCC% %CFLAGS% -c apps\clear.c -o %OUT%\clear.o
+if errorlevel 1 exit /b 1
+
+echo Linking: clear.elf
+%LD% %LDFLAGS% -o %OUT%\clear.elf %OUT%\clear.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: clear.bin
+%OBJCOPY% -O binary %OUT%\clear.elf %OUT%\clear.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: help
+%GCC% %CFLAGS% -c apps\help.c -o %OUT%\help.o
+if errorlevel 1 exit /b 1
+
+echo Linking: help.elf
+%LD% %LDFLAGS% -o %OUT%\help.elf %OUT%\help.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: help.bin
+%OBJCOPY% -O binary %OUT%\help.elf %OUT%\help.bin
+if errorlevel 1 exit /b 1
+
+echo Done: hello.bin, gfxsnake.bin, echo.bin, clear.bin, help.bin

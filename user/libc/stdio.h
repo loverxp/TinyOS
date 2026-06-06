@@ -15,4 +15,7 @@ int printf(const char* fmt, ...);
 /* Format string into buffer */
 int sprintf(char* buf, const char* fmt, ...);
 
+/* Read formatted input from keyboard */
+int scanf(const char* fmt, ...);
+
 #endif /* STDIO_H */

@@ -18,6 +18,11 @@ static volatile uint8_t kbd_buffer[KBD_BUF_SIZE];
 static volatile int kbd_buf_head = 0;
 static volatile int kbd_buf_tail = 0;
 
+// Character buffer for user-mode getchar/scanf
+static volatile char char_buffer[KBD_BUF_SIZE];
+static volatile int char_buf_head = 0;
+static volatile int char_buf_tail = 0;
+
 static void kbd_buf_push(uint8_t scancode, uint8_t extended) {
     int next = (kbd_buf_head + 1) % KBD_BUF_SIZE;
     if (next == kbd_buf_tail) return; // buffer full
@@ -37,10 +42,39 @@ uint32_t keyboard_read_key(void) {
     return key;
 }
 
+static void char_buf_push(char c) {
+    int next = (char_buf_head + 1) % KBD_BUF_SIZE;
+    if (next == char_buf_tail) return; // full
+    char_buffer[char_buf_head] = c;
+    char_buf_head = next;
+}
+
+char keyboard_read_char(void) {
+    disable_interrupts();
+    if (char_buf_head == char_buf_tail) {
+        enable_interrupts();
+        return 0; // no char available
+    }
+    char c = char_buffer[char_buf_tail];
+    char_buf_tail = (char_buf_tail + 1) % KBD_BUF_SIZE;
+    enable_interrupts();
+    return c;
+}
+
+char keyboard_getchar(void) {
+    while (1) {
+        char c = keyboard_read_char();
+        if (c) return c;
+        asm volatile("hlt");
+    }
+}
+
 void keyboard_clear_buffer(void) {
     disable_interrupts();
     kbd_buf_head = 0;
     kbd_buf_tail = 0;
+    char_buf_head = 0;
+    char_buf_tail = 0;
     enable_interrupts();
 }
 
@@ -128,6 +162,8 @@ void keyboard_handler(void) {
                 if (char_callback) {
                     char_callback(c);
                 }
+                // Also push to char buffer for user-mode getchar
+                char_buf_push(c);
             }
         }
     }

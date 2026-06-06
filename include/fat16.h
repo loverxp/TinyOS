@@ -65,4 +65,9 @@ const fat16_bpb_t* fat16_get_bpb(void);
 int fat16_write(const char* name, const void* data, uint32_t size);
 int fat16_delete(const char* name);
 
+/* Subdirectory support */
+int fat16_mkdir(const char* name);
+int fat16_rmdir(const char* name);
+int fat16_list_dir(const char* path);
+
 #endif /* FAT16_H */

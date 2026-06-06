@@ -48,7 +48,7 @@
 | `free 0xADDR` | 释放指定地址的物理页              |
 | `kmtest`      | 运行 kmalloc/kfree 堆分配器测试 |
 | `except`      | 触发除零异常测试异常处理            |
-| `echo <文本>`   | 回显输入的文本                 |
+| `echo <文本>`   | 回显输入的文本（Ring 3 用户程序执行）                 |
 | `testuser`    | 切换到 Ring 3（用户态）并返回      |
 | `runuser`     | 加载并执行嵌入式用户程序           |
 | `hello`       | 运行 Ring 3 示例用户程序（使用 libc） |
@@ -59,14 +59,18 @@
 | `gtest`       | 内核级 VGA 图形测试              |
 | `gui`         | 进入图形桌面环境（VBE 高分辨率模式，按 Esc 退出） |
 | **文件系统**    |                         |
-| `ls`          | 列出磁盘根目录文件               |
-| `cat <文件名>`   | 显示文件内容                   |
+| `ls [<path>]` | 列出目录内容（支持路径）           |
+| `cat <路径>`   | 显示文件内容（支持路径）           |
+| `mkdir <路径>`  | 创建子目录（支持路径）             |
+| `rmdir <路径>`  | 删除空子目录（支持路径）           |
+| `write <路径> <文本>` | 创建或覆写文件（支持路径）       |
+| `rm <路径>`    | 删除文件（支持路径）               |
 | `diskinfo`    | 显示磁盘/文件系统信息              |
 | **网络**       |                         |
 | `pci`         | 列出所有 PCI 设备               |
 | `net`         | 显示网络配置 (IP/网关/MAC)     |
-| `ping <IP>`   | 发送 ICMP Echo 请求           |
-| `send <IP> <端口> <消息>` | 发送 UDP 数据包        |
+| `ping <IP|hostname>` | 发送 ICMP Echo 请求（支持域名）     |
+| `send <IP|hostname> <端口> <消息>` | 发送 UDP 数据包（支持域名）        |
 | `webserver`   | 启动 HTTP 服务器（端口 80，宿主机 :8088 转发） |
 | `webserver stop` | 停止 HTTP 服务器              |
 | `date`        | 显示当前日期/时间（CMOS RTC）   |
@@ -98,16 +102,23 @@
 - ✅ 分页机制（页目录/页表，identity map 前 8MB）
 - ✅ 堆内存分配器（kmalloc/kfree，块式管理）
 - ✅ printf/sprintf 格式化输出（%s, %d, %u, %x, %02x, %04x, %c, %p）
-- ✅ 用户态标准库 libc（printf, sprintf, exit, 字符串函数）
+- ✅ 用户态标准库 libc（printf, scanf, sprintf, exit, 字符串函数，malloc/free）
+- ✅ 用户 I/O 系统调用（getchar, readline, get_cmdline, clear_screen）
 - ✅ 交互式 Shell（多命令支持）
 - ✅ 系统调用（int 0x80，支持从用户态返回内核态）
 - ✅ 抢占式多任务调度器（Round-Robin，IRQ0 驱动）
+- ✅ yield/sleep 系统调用（协作式多任务）
+- ✅ 进程间通信 IPC（Pipe 管道、Message Queue 消息队列、Shared Memory 共享内存）
+- ✅ 用户程序框架（ELF 加载器，Ring 3 执行，echo/clear/help 已迁移为用户程序）
 - ✅ 串口调试输出
+- ✅ 串口 Shell（COM1 中断收发，与 VGA 键盘双终端并行）
 - ✅ ATA PIO 磁盘驱动（主 IDE 通道，28-bit LBA）
-- ✅ FAT16 文件系统（只读，目录列表/文件读取）
+- ✅ FAT16 文件系统（读/写/删除，FAT 链管理）
+- ✅ FAT16 子目录支持（路径解析，mkdir/rmdir）
 - ✅ PCI 总线扫描（配置空间读取，设备枚举）
 - ✅ NE2000 网卡驱动（远程 DMA，接收环形缓冲区，IRQ 处理）
-- ✅ 网络协议栈（ARP / IPv4 / ICMP / UDP / TCP）
+- ✅ 网络协议栈（ARP / IPv4 / ICMP / UDP / TCP / DHCP）
+- ✅ DNS 域名解析（通过 QEMU 内置 DNS 10.0.2.3:53）
 - ✅ HTTP WebServer（端口 80，基于 TCP，响应 HTML 页面）
 - ✅ RTC 实时时钟驱动（CMOS，BCD/二进制模式自动检测）
 
@@ -127,30 +138,37 @@ TinyOS/
 │   ├── except.c           # 异常处理（含 Page Fault 详细诊断）
 │   ├── loader.c           # 用户程序 ELF 加载器
 │   ├── scheduler.c        # 抢占式多任务调度器
-│   ├── fat16.c            # FAT16 文件系统解析器
-│   ├── net.c              # 网络协议栈 (ARP/IP/ICMP/UDP/TCP)
+│   ├── ipc.c              # 进程间通信（Pipe/MQ/SHM）
+│   ├── fat16.c            # FAT16 文件系统（读写删除+子目录）
+│   ├── net.c              # 网络协议栈 (ARP/IP/ICMP/UDP/TCP/DHCP/DNS)
 │   ├── webserver.c        # HTTP WebServer
 │   ├── wm.c               # 窗口管理器（创建/拖拽/关闭/Z-order）
 │   ├── embedded_user.asm  # 嵌入的 gfxsnake.elf
+│   ├── embedded_hello.asm # 嵌入的 hello.elf
+│   ├── embedded_echo.asm  # 嵌入的 echo.elf
+│   ├── embedded_clear.asm # 嵌入的 clear.elf
+│   ├── embedded_help.asm  # 嵌入的 help.elf
 │   └── user.asm           # 用户态入口和切换逻辑
 ├── user/
 │   ├── crt0.s             # 用户程序启动代码
 │   ├── hello.c            # 示例用户程序（使用 libc）
 │   ├── gfxsnake.c         # 贪吃蛇游戏（VGA Mode 13h 像素模式）
+│   ├── apps/              # 用户程序源码
+│   │   ├── echo.c         # echo 命令用户程序
+│   │   ├── clear.c        # clear 命令用户程序
+│   │   └── help.c         # help 命令用户程序
 │   ├── libc/              # 用户态标准库
-│   │   ├── stdio.c        # printf/sprintf 实现
-│   │   ├── stdlib.c       # exit 等工具函数
+│   │   ├── stdio.c        # printf/scanf/sprintf 实现
+│   │   ├── stdlib.c       # malloc/free/exit 等工具函数
 │   │   ├── string.c       # 字符串与内存操作
-│   │   ├── syscall.h      # 系统调用封装
-│   │   └── ...            # 头文件
-│   ├── user.ld            # 用户程序链接脚本
-│   ├── build.bat          # 用户程序构建脚本
-│   └── programs/          # 编译输出的用户程序（移入 build/user/）
+│   │   └── syscall.h      # 系统调用封装（syscalls 0-24）
+│   ├── user.ld            # 用户程序链接脚本（加载地址 0x400000）
+│   └── build.bat          # 用户程序构建脚本（编译 libc + apps → ELF）
 ├── drivers/
 │   ├── vga.c              # VGA 文本显示（80x25, 状态栏）
 │   ├── keyboard.c         # 键盘驱动（中断驱动）
 │   ├── timer.c            # 定时器驱动（中断驱动）
-│   ├── interrupts.c       # 中断处理（C 部分）
+│   ├── interrupts.c       # 中断处理（C 部分，含系统调用分发）
 │   ├── interrupts.asm     # 中断处理中断桩（汇编）
 │   ├── gdt.asm            # GDT 表定义（汇编）
 │   ├── io.asm             # I/O 端口操作
@@ -161,10 +179,13 @@ TinyOS/
 │   ├── framebuf.c         # 帧缓冲抽象层（putpixel/fillrect/双缓冲）
 │   ├── mouse.c            # PS/2 鼠标驱动（IRQ12）
 │   ├── serial.c           # 串口驱动（COM1 中断收发）
-│   └── rtc.c              # CMOS 实时时钟驱动
+│   ├── rtc.c              # CMOS 实时时钟驱动
+│   └── builtin_font.c     # 内建 8x16 等宽字体
 ├── lib/
 │   ├── string.c           # 字符串处理
-│   └── stdio.c            # printf/sprintf 格式化输出
+│   ├── stdio.c            # printf/sprintf 格式化输出
+│   ├── prng.c             # 伪随机数生成器 (xorshift32)
+│   └── debug.c            # 调试输出框架（kprintf 四级日志+栈回溯）
 ├── include/               # 头文件
 │   ├── types.h            # 类型定义
 │   ├── elf.h              # ELF32 数据结构
@@ -184,17 +205,20 @@ TinyOS/
 │   ├── stdio.h
 │   ├── loader.h
 │   ├── scheduler.h
+│   ├── ipc.h              # 进程间通信（Pipe/MQ/SHM）
 │   ├── ata.h              # ATA 驱动
 │   ├── fat16.h            # FAT16 文件系统
 │   ├── pci.h              # PCI 总线
 │   ├── ne2000.h           # NE2000 网卡
-│   ├── net.h              # 网络协议栈
+│   ├── net.h              # 网络协议栈（含 DNS）
 │   ├── webserver.h        # HTTP WebServer
 │   ├── vbe.h              # Bochs VBE 显卡
 │   ├── framebuf.h         # 帧缓冲抽象层
 │   ├── mouse.h            # PS/2 鼠标
 │   ├── serial.h           # 串口驱动
 │   ├── rtc.h              # CMOS 实时时钟
+│   ├── prng.h             # 伪随机数生成器
+│   ├── debug.h            # 调试输出框架
 │   └── window.h           # 窗口管理器
 ├── tools/                 # 交叉编译器
 ├── scripts/               # 构建与运行脚本

@@ -120,3 +120,137 @@ int sprintf(char* buf, const char* fmt, ...) {
     va_end(args);
     return ret;
 }
+
+/* ── scanf ────────────────────────────────────────────────────────── */
+
+/* Skip whitespace in input (space, tab, newline) */
+static void skip_whitespace(void) {
+    char c;
+    while (1) {
+        c = getchar();
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') continue;
+        // Put back by making it available again? Can't unget with our simple setup.
+        // Instead we just return the first non-whitespace char, but we can't push it back...
+        // Solution: scanf operates on a line at a time (as most simple implementations do)
+        break;
+    }
+}
+
+/* Simple scanf implementation.
+ * Reads one line via readline(), then parses it.
+ * Supports: %d %u %x %s %c
+ */
+int scanf(const char* fmt, ...) {
+    char line[256];
+    int len = readline(line, sizeof(line));
+    if (len <= 0) return 0;
+
+    va_list args;
+    va_start(args, fmt);
+
+    const char* p = line;
+    int items = 0;
+
+    while (*fmt) {
+        // Skip whitespace in format
+        if (*fmt == ' ' || *fmt == '\t' || *fmt == '\n') {
+            fmt++;
+            continue;
+        }
+
+        if (*fmt != '%') {
+            // Literal character match
+            // Skip whitespace in input if format has space
+            if (*fmt == ' ') {
+                while (*p == ' ' || *p == '\t') p++;
+            } else if (*p == *fmt) {
+                p++;
+            } else {
+                break; // mismatch
+            }
+            fmt++;
+            continue;
+        }
+
+        fmt++; // skip '%'
+        int is_long = 0;
+        if (*fmt == 'l') { is_long = 1; fmt++; }
+
+        switch (*fmt) {
+            case 'd': {
+                // Skip whitespace
+                while (*p == ' ' || *p == '\t') p++;
+                int neg = 0;
+                if (*p == '-') { neg = 1; p++; }
+                int val = 0;
+                while (*p >= '0' && *p <= '9') {
+                    val = val * 10 + (*p - '0');
+                    p++;
+                }
+                if (neg) val = -val;
+                if (is_long) {
+                    long* out = va_arg(args, long*);
+                    *out = val;
+                } else {
+                    int* out = va_arg(args, int*);
+                    *out = val;
+                }
+                items++;
+                break;
+            }
+            case 'u': {
+                while (*p == ' ' || *p == '\t') p++;
+                unsigned int val = 0;
+                while (*p >= '0' && *p <= '9') {
+                    val = val * 10 + (*p - '0');
+                    p++;
+                }
+                unsigned int* out = va_arg(args, unsigned int*);
+                *out = val;
+                items++;
+                break;
+            }
+            case 'x': case 'X': {
+                while (*p == ' ' || *p == '\t') p++;
+                if (*p == '0' && (*(p+1) == 'x' || *(p+1) == 'X')) p += 2;
+                unsigned int val = 0;
+                while (1) {
+                    char c = *p;
+                    if (c >= '0' && c <= '9') { val = val * 16 + (c - '0'); p++; }
+                    else if (c >= 'a' && c <= 'f') { val = val * 16 + (c - 'a' + 10); p++; }
+                    else if (c >= 'A' && c <= 'F') { val = val * 16 + (c - 'A' + 10); p++; }
+                    else break;
+                }
+                unsigned int* out = va_arg(args, unsigned int*);
+                *out = val;
+                items++;
+                break;
+            }
+            case 's': {
+                while (*p == ' ' || *p == '\t') p++;
+                char* out = va_arg(args, char*);
+                while (*p && *p != ' ' && *p != '\t' && *p != '\n') {
+                    *out++ = *p++;
+                }
+                *out = '\0';
+                items++;
+                break;
+            }
+            case 'c': {
+                char* out = va_arg(args, char*);
+                if (*p) {
+                    *out = *p++;
+                    items++;
+                }
+                break;
+            }
+            default:
+                fmt++;
+                break;
+        }
+        fmt++;
+    }
+
+    va_end(args);
+    return items;
+}

@@ -189,6 +189,10 @@ int  net_tcp_close(uint32_t dst_ip, uint16_t dst_port);
 /* DHCP */
 int net_dhcp_discover(void);
 
+/* DNS */
+int net_dns_query(const char* hostname, uint32_t* out_ip);
+int net_is_valid_ip(const char* s);
+
 /* Socket abstraction layer */
 #define SOCK_STREAM  1   /* TCP */
 #define SOCK_DGRAM   2   /* UDP */

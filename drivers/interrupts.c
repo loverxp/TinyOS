@@ -249,6 +249,7 @@ void register_interrupt_handler(uint8_t n, void (*handler)(void)) {
 // Forward declarations for syscall helpers
 extern uint32_t timer_get_ticks(void);
 extern uint32_t keyboard_read_key(void);
+extern char keyboard_getchar(void);
 extern void keyboard_clear_buffer(void);
 extern void task_yield(void);
 extern void task_sleep(uint32_t ms);
@@ -726,6 +727,59 @@ void syscall_handler(uint32_t* regs) {
     }
     if (syscall_no == 20) {
         regs[8] = (uint32_t)shm_close((const char*)arg1);
+        return;
+    }
+
+    if (syscall_no == 21) {
+        // Syscall 21: getchar() - blocking read character
+        regs[8] = (uint32_t)(unsigned char)keyboard_getchar();
+        return;
+    }
+
+    if (syscall_no == 22) {
+        // Syscall 22: readline(buf, max) - blocking read a line
+        // arg1 = buffer address, arg2 = max length
+        char* buf = (char*)arg1;
+        int max = (int)arg2;
+        int pos = 0;
+        while (pos < max - 1) {
+            char c = keyboard_getchar();
+            if (c == '\b') {
+                if (pos > 0) { pos--; }
+                continue;
+            }
+            if (c == '\n' || c == '\r') {
+                buf[pos] = '\0';
+                break;
+            }
+            if (c >= 32) {
+                buf[pos++] = c;
+            }
+        }
+        buf[pos] = '\0';
+        regs[8] = (uint32_t)pos;
+        return;
+    }
+
+    if (syscall_no == 23) {
+        // Syscall 23: get_cmdline(buf, max) - get command line args for user cmd
+        // arg1 = buffer address, arg2 = max length
+        extern char user_cmd_args[256];
+        char* dst = (char*)arg1;
+        uint32_t max = arg2;
+        uint32_t i;
+        for (i = 0; i < max - 1 && user_cmd_args[i]; i++) {
+            dst[i] = user_cmd_args[i];
+        }
+        dst[i] = '\0';
+        regs[8] = i;
+        return;
+    }
+
+    if (syscall_no == 24) {
+        // Syscall 24: clear_screen() - clear VGA text screen
+        vga_clear_screen(VGA_COLOR_BLACK);
+        vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
         return;
     }
 

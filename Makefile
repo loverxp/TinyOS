@@ -40,7 +40,8 @@ C_SRCS    = kernel/kernel.c kernel/shell.c kernel/except.c kernel/gdt.c \
             lib/string.c lib/stdio.c lib/prng.c lib/debug.c
 ASM_SRCS  = boot/boot.asm drivers/interrupts.asm drivers/gdt.asm \
             drivers/io.asm kernel/user.asm kernel/embedded_user.asm \
-            kernel/embedded_hello.asm kernel/switch.asm
+            kernel/embedded_hello.asm kernel/embedded_echo.asm \
+            kernel/embedded_clear.asm kernel/embedded_help.asm kernel/switch.asm
 
 # Object files (all in build/; .asm -> _asm.o to avoid name collision with .c)
 C_OBJS    = $(patsubst %.c,$(BUILD)/%.o,$(notdir $(C_SRCS)))
@@ -77,6 +78,15 @@ $(BUILD)/embedded_user_asm.o: kernel/embedded_user.asm build/user/gfxsnake.elf |
 	$(AS) $(ASFLAGS) -o $@ $<
 
 $(BUILD)/embedded_hello_asm.o: kernel/embedded_hello.asm build/user/hello.elf | $(BUILD)
+	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD)/embedded_echo_asm.o: kernel/embedded_echo.asm build/user/echo.elf | $(BUILD)
+	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD)/embedded_clear_asm.o: kernel/embedded_clear.asm build/user/clear.elf | $(BUILD)
+	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD)/embedded_help_asm.o: kernel/embedded_help.asm build/user/help.elf | $(BUILD)
 	$(AS) $(ASFLAGS) -o $@ $<
 
 # Compile C files: map e.g. kernel/kernel.c -> build/kernel.o

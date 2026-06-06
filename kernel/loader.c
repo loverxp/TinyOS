@@ -20,6 +20,18 @@ extern uint8_t embedded_user_end[];
 extern uint8_t embedded_hello_start[];
 extern uint8_t embedded_hello_end[];
 
+// Embedded echo binary (from embedded_echo.asm)
+extern uint8_t embedded_echo_start[];
+extern uint8_t embedded_echo_end[];
+
+// Embedded clear binary (from embedded_clear.asm)
+extern uint8_t embedded_clear_start[];
+extern uint8_t embedded_clear_end[];
+
+// Embedded help binary (from embedded_help.asm)
+extern uint8_t embedded_help_start[];
+extern uint8_t embedded_help_end[];
+
 // External assembly functions
 extern void vga_initialize(void);
 extern void vga_set_color(enum vga_color fg, enum vga_color bg);
@@ -221,4 +233,66 @@ void run_hello_user(void) {
     
     // Reinitialize shell
     shell_init();
+}
+
+/* Generic helper to load and run an embedded ELF user program.
+ * Returns after the user program exits via syscall 0.
+ * On success, restores shell. On error, prints message.
+ */
+static void run_embedded_elf(const char* name, const uint8_t* start, const uint8_t* end) {
+    uint32_t size = end - start;
+
+    if (size < sizeof(Elf32_Ehdr)) {
+        printf("ERROR: %s is too small!\n", name);
+        return;
+    }
+
+    const Elf32_Ehdr* ehdr = (const Elf32_Ehdr*)start;
+    uint32_t entry = ehdr->e_entry;
+
+    if (elf_load(start, size) != 0) {
+        printf("ERROR: Failed to load %s\n", name);
+        return;
+    }
+
+    void* user_stack = pmm_alloc_page();
+    if (!user_stack) {
+        printf("ERROR: Failed to allocate user stack for %s\n", name);
+        return;
+    }
+
+    uint32_t user_esp = (uint32_t)user_stack + 4096;
+
+    // Send EOI for IRQ1 before Ring 3 switch
+    outb(0x20, 0x20);
+
+    run_user_task_ex((void (*)(void))entry, (void*)user_esp);
+
+    // Restore VGA text mode
+    vga_set_mode03h();
+    pmm_free_page(user_stack);
+
+    vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    size_t crow = vga_get_cursor_row();
+    if (crow < VGA_HEIGHT - 2) crow++;
+    vga_set_cursor(crow, 0);
+
+    shell_init();
+}
+
+/* External user command arguments buffer */
+extern char user_cmd_args[256];
+
+void run_echo_user(const char* text) {
+    /* Copy echo text to user command args buffer */
+    strcpy(user_cmd_args, text);
+    run_embedded_elf("echo.elf", embedded_echo_start, embedded_echo_end);
+}
+
+void run_clear_user(void) {
+    run_embedded_elf("clear.elf", embedded_clear_start, embedded_clear_end);
+}
+
+void run_help_user(void) {
+    run_embedded_elf("help.elf", embedded_help_start, embedded_help_end);
 }

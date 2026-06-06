@@ -2,6 +2,7 @@
 #include "../include/ne2000.h"
 #include "../include/stdio.h"
 #include "../include/string.h"
+#include "../include/timer.h"
 
 /* Network configuration (host byte order) */
 static uint32_t my_ip = 0;
@@ -929,6 +930,236 @@ int net_dhcp_discover(void) {
     return (dhcp_state == 4) ? 0 : -1;
 }
 
+/* ---- DNS Resolution ---- */
+
+/* DNS header structure */
+typedef struct {
+    uint16_t id;
+    uint16_t flags;
+    uint16_t qdcount;
+    uint16_t ancount;
+    uint16_t nscount;
+    uint16_t arcount;
+} __attribute__((packed)) dns_header_t;
+
+/* DNS constants */
+#define DNS_FLAG_RD      0x0100  /* Recursion Desired */
+#define DNS_FLAG_QR      0x8000  /* Query Response */
+#define DNS_TYPE_A       1
+#define DNS_CLASS_IN     1
+
+/* Static buffers for DNS callback */
+static uint8_t dns_rx_buf[512];
+static uint16_t dns_rx_len = 0;
+static volatile int dns_rx_ready = 0;
+
+/* Temporary UDP callback for DNS response */
+static void dns_udp_cb(uint32_t src_ip, uint16_t src_port,
+                        uint16_t dst_port,
+                        const uint8_t* data, uint16_t len) {
+    (void)src_ip;
+    (void)dst_port;
+    if (src_port == 53 && len > 0 && len <= 512) {
+        memcpy(dns_rx_buf, data, len);
+        dns_rx_len = len;
+        dns_rx_ready = 1;
+    }
+}
+
+/* Encode a hostname into DNS label format.
+ * Input:  "www.example.com"
+ * Output: "\x03www\x07example\x03com\x00"
+ * Returns the encoded length. */
+static int dns_encode_name(const char* hostname, uint8_t* out, int max_len) {
+    int pos = 0;
+    while (*hostname) {
+        const char* dot = hostname;
+        while (*dot && *dot != '.') dot++;
+        int label_len = dot - hostname;
+        if (label_len == 0) return -1;
+        if (label_len > 63) return -1;
+        if (pos + label_len + 1 > max_len) return -1;
+        out[pos++] = (uint8_t)label_len;
+        for (int i = 0; i < label_len; i++) {
+            out[pos++] = (uint8_t)hostname[i];
+        }
+        if (*dot == '.') hostname = dot + 1;
+        else break;
+    }
+    if (pos + 1 > max_len) return -1;
+    out[pos++] = 0;
+    return pos;
+}
+
+/* Resolve a hostname to an IP address via DNS query to 10.0.2.3:53.
+ * Returns 0 on success, -1 on failure. */
+int net_dns_query(const char* hostname, uint32_t* out_ip) {
+    if (!hostname || !out_ip) return -1;
+
+    uint32_t my_ip_val, gw, mask;
+    net_get_config(&my_ip_val, &gw, &mask);
+    if (my_ip_val == 0) return -1;
+
+    /* Build DNS query packet */
+    uint8_t dns_pkt[512];
+    memset(dns_pkt, 0, sizeof(dns_pkt));
+
+    dns_header_t* dns_hdr = (dns_header_t*)dns_pkt;
+    dns_hdr->id = htons(0x1234);
+    dns_hdr->flags = htons(DNS_FLAG_RD);
+    dns_hdr->qdcount = htons(1);
+
+    /* Encode the hostname as DNS labels */
+    int qname_len = dns_encode_name(hostname, dns_pkt + sizeof(dns_header_t),
+                                     sizeof(dns_pkt) - sizeof(dns_header_t) - 4);
+    if (qname_len < 0) return -1;
+
+    int qpos = sizeof(dns_header_t) + qname_len;
+    dns_pkt[qpos++] = 0;
+    dns_pkt[qpos++] = DNS_TYPE_A;
+    dns_pkt[qpos++] = 0;
+    dns_pkt[qpos++] = DNS_CLASS_IN;
+    int dns_len = qpos;
+
+    uint32_t dns_server = IP4(10, 0, 2, 3); /* QEMU's built-in DNS */
+    uint16_t dns_port = 53;
+
+    /* Save and replace UDP callback during DNS */
+    udp_recv_callback_t old_cb = udp_callback;
+    dns_rx_ready = 0;
+    udp_callback = dns_udp_cb;
+
+    int result = -1;
+
+    /* First resolve ARP for DNS server if needed */
+    const arp_entry_t* arp = net_arp_lookup(dns_server);
+    if (!arp) {
+        net_send_arp_request(dns_server);
+        uint32_t arp_start = timer_get_ticks();
+        while (timer_get_ticks() - arp_start < 10) {
+            ne2000_poll_recv();
+            arp = net_arp_lookup(dns_server);
+            if (arp) break;
+        }
+        if (!arp) {
+            udp_callback = old_cb;
+            return -1;
+        }
+    }
+
+    /* Build and send the DNS query packet */
+    build_eth_header(arp->mac, ETHERTYPE_IP);
+
+    uint8_t* udp_start = tx_frame + sizeof(eth_header_t) + 20;
+    udp_header_t* udp = (udp_header_t*)udp_start;
+    udp->src_port = htons(12345);
+    udp->dst_port = htons(dns_port);
+    udp->length = htons(sizeof(udp_header_t) + dns_len);
+    udp->checksum = 0;
+    memcpy(udp_start + sizeof(udp_header_t), dns_pkt, dns_len);
+
+    uint16_t payload_len = sizeof(udp_header_t) + dns_len;
+
+    ip_header_t* ip = (ip_header_t*)(tx_frame + sizeof(eth_header_t));
+    ip->version_ihl = 0x45;
+    ip->tos = 0;
+    ip->total_length = htons(20 + payload_len);
+    ip->identification = htons(ip_id_counter++);
+    ip->flags_frag = htons(0x4000);
+    ip->ttl = 64;
+    ip->protocol = IP_PROTO_UDP;
+    ip->src_ip = my_ip_val;
+    ip->dst_ip = dns_server;
+    ip->checksum = 0;
+    ip->checksum = ip_checksum(ip, 20);
+
+    uint16_t frame_len = sizeof(eth_header_t) + 20 + payload_len;
+
+    ne2000_send(tx_frame, frame_len);
+    stats.udp_sent++;
+
+    /* Wait for response */
+    uint32_t deadline = timer_get_ticks() + 50; /* ~1 second */
+    while (timer_get_ticks() < deadline) {
+        ne2000_poll_recv();
+        if (dns_rx_ready) {
+            if (dns_rx_len < (int)sizeof(dns_header_t)) break;
+
+            dns_header_t* resp = (dns_header_t*)dns_rx_buf;
+            uint16_t resp_flags = ntohs(resp->flags);
+            uint16_t resp_ancount = ntohs(resp->ancount);
+
+            if ((resp_flags & 0x000F) != 0) break;
+            if (!(resp_flags & DNS_FLAG_QR)) break;
+
+            /* Skip question section */
+            int pos = sizeof(dns_header_t);
+            while (pos < dns_rx_len) {
+                uint8_t len = dns_rx_buf[pos];
+                if (len == 0) { pos++; break; }
+                if ((len & 0xC0) == 0xC0) { pos += 2; break; }
+                pos += len + 1;
+            }
+            pos += 4; /* skip QTYPE + QCLASS */
+
+            /* Process answer section (first A record only) */
+            for (int a = 0; a < resp_ancount && a < 1; a++) {
+                while (pos < dns_rx_len) {
+                    uint8_t len = dns_rx_buf[pos];
+                    if (len == 0) { pos++; break; }
+                    if ((len & 0xC0) == 0xC0) { pos += 2; break; }
+                    pos += len + 1;
+                    if (pos >= dns_rx_len) break;
+                }
+
+                if (pos + 10 > dns_rx_len) break;
+                uint16_t type = (dns_rx_buf[pos] << 8) | dns_rx_buf[pos+1];
+                pos += 8; /* skip TYPE + CLASS + TTL */
+                uint16_t rdlength = (dns_rx_buf[pos] << 8) | dns_rx_buf[pos+1];
+                pos += 2;
+
+                if (type == DNS_TYPE_A && rdlength == 4 && pos + 4 <= dns_rx_len) {
+                    *out_ip = (uint32_t)dns_rx_buf[pos] |
+                              ((uint32_t)dns_rx_buf[pos+1] << 8) |
+                              ((uint32_t)dns_rx_buf[pos+2] << 16) |
+                              ((uint32_t)dns_rx_buf[pos+3] << 24);
+                    result = 0;
+                    serial_printf("[DNS] Resolved %s -> %u.%u.%u.%u\n",
+                                  hostname,
+                                  *out_ip & 0xFF, (*out_ip >> 8) & 0xFF,
+                                  (*out_ip >> 16) & 0xFF, (*out_ip >> 24) & 0xFF);
+                }
+                break;
+            }
+            break;
+        }
+        asm volatile("hlt");
+    }
+
+    udp_callback = old_cb;
+    return result;
+}
+
+/* Check if a string is a valid IPv4 address (A.B.C.D) */
+int net_is_valid_ip(const char* s) {
+    int octets = 0;
+    uint32_t val = 0;
+    while (*s) {
+        if (*s >= '0' && *s <= '9') {
+            val = val * 10 + (*s - '0');
+        } else if (*s == '.') {
+            if (val > 255) return 0;
+            octets++;
+            val = 0;
+        } else {
+            return 0;
+        }
+        s++;
+    }
+    if (val > 255) return 0;
+    return (octets == 3);
+}
+
 /* ---- Socket Abstraction Layer ---- */
 
 static socket_t sockets[MAX_SOCKETS];
@@ -997,7 +1228,6 @@ int sock_recv(int fd, void* buf, uint16_t max_len, uint32_t timeout_ms) {
     socket_t* s = &sockets[fd];
 
     /* Wait for data with timeout */
-    extern uint32_t timer_get_ticks(void);
     uint32_t deadline = timer_get_ticks() + (timeout_ms + 19) / 20;
     while (s->rx_count == 0) {
         if (timeout_ms > 0 && timer_get_ticks() >= deadline) return 0;

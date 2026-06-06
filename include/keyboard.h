@@ -25,6 +25,12 @@ void keyboard_initialize(void);
 // Non-blocking read from keyboard buffer (returns scancode | 0x80 if extended, or 0 if empty)
 uint32_t keyboard_read_key(void);
 
+// Non-blocking read character from char buffer (returns 0 if empty)
+char keyboard_read_char(void);
+
+// Blocking read character (halts until key pressed)
+char keyboard_getchar(void);
+
 // Clear keyboard buffer
 void keyboard_clear_buffer(void);
 

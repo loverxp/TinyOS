@@ -231,7 +231,7 @@ struct page_directory_entry {
   - 内含示例文件：readme.txt, hello.c, config.txt, test.txt
 
 - [x] **写支持**（FAT 表更新、文件创建/覆写/删除，`write`/`rm` 命令）
-- [ ] **子目录支持**
+- [x] **子目录支持**（路径解析、`mkdir`/`rmdir`，`ls/cat/write/rm` 支持路径参数）
 
 ### 3.2 块设备驱动
 
@@ -286,7 +286,7 @@ struct page_directory_entry {
 **目标**：命令行解释器
 
 - [x] 命令解析
-- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `ls`, `cat`, `diskinfo`, `pci`, `net`, `ping`, `send`, `recv`, `arp`, `netstat`, `rand`, `write`, `rm`, `dhcp`, `tcp-recv`, `ipctest`
+- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `hello`, `ls [path]`, `cat <path>`, `mkdir <path>`, `rmdir <path>`, `write <path>`, `rm <path>`, `diskinfo`, `pci`, `net`, `ping <ip|hostname>`, `send <ip|hostname>`, `recv`, `arp`, `netstat`, `rand`, `dhcp`, `tcp-recv`, `ipctest`
 - [ ] 程序执行：`fork` + `exec`
 - [ ] 管道支持：`cmd1 | cmd2`
 
@@ -303,10 +303,11 @@ struct page_directory_entry {
   - `printf(fmt, ...)` - 基于 syscall 7 实现
   - `sprintf(buf, fmt, ...)` - 格式化到字符串
   - 支持 `%d`, `%x`, `%s`, `%c`, `%p`
-- [ ] **待扩展**
-  - `malloc(size)` / `free(ptr)` - 堆分配器
+- [x] **待扩展**
+  - `malloc(size)` / `free(ptr)` - 堆分配器 ✅ 已实现
   - `write(fd, buf, len)` - 文件 I/O
-  - `scanf` - 格式化输入
+  - `scanf` - 格式化输入 ✅ 已实现
+  - `getchar` / `readline` / `get_cmdline` / `clear_screen` 系统调用 ✅ 已实现
 
 ---
 
@@ -361,7 +362,8 @@ struct page_directory_entry {
 - [ ] **网络统计信息** — 添加 `netstat` 命令显示收发统计（发送/接收包数、错误数） ✅ 已实现
 - [ ] **Shell 命令输出优化** — 移除 ping/send 的 `[1/4]` 调试输出，仅在出错时显示诊断信息 ✅ 已实现
 - [x] **DHCP 客户端** — 自动获取 IP/网关/掩码，替代硬编码 10.0.2.15 ✅ 已实现（`dhcp` 命令）
-- [ ] **DNS 解析** — 支持域名到 IP 的解析（查询 10.0.2.3）
+- [x] **DNS 解析** — 支持域名到 IP 的解析（查询 10.0.2.3）✅ 已实现
+- [x] **Shell 命令迁移到用户态** — echo/clear/help 作为 Ring 3 ELF 程序运行 ✅ 已实现
 - [x] **TCP 协议栈**
   - 三次握手（SYN → SYN-ACK → ACK），连接状态机
   - 序列号/确认号管理 + 校验和（复用 IP 校验和函数）

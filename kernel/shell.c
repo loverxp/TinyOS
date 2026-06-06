@@ -32,6 +32,9 @@
 static char line_buffer[LINE_BUF_SIZE];
 static size_t line_pos = 0;
 
+/* Command line arguments buffer, accessible to syscall 23 (get_cmdline) */
+char user_cmd_args[256];
+
 static void shell_prompt(void) {
     vga_writestring("TinyOS> ");
     serial_writestring("TinyOS> ");
@@ -720,49 +723,11 @@ static void shell_handle_command(const char* cmd) {
     if (*cmd == '\0') return;
 
     if (strcmp(cmd, "help") == 0) {
-            printf("Commands:\n");
-            printf("  help       - Show this help\n");
-            printf("  clear      - Clear screen\n");
-            printf("  uptime     - Show system uptime\n");
-            printf("  meminfo    - Show memory usage\n");
-            printf("  alloc [N]  - Allocate N pages (default: 1)\n");
-            printf("  free 0xADDR- Free a page by address\n");
-            printf("  except     - Trigger Division By Zero\n");
-            printf("  kmtest     - Run kmalloc/kfree test\n");
-            printf("  echo <txt> - Echo text\n");
-            printf("  testuser   - Switch to Ring 3 and return\n");
-            printf("  runuser    - Load and run external user program\n");
-            printf("  pageinfo   - Show page table info\n");
-            printf("  snake      - Play Snake game (text mode)\n");
-            printf("  gfxsnake   - Play Snake game (pixel graphics mode)\n");
-            printf("  hello      - Run hello user program\n");
-            printf("  schedtest [N]- Start scheduler test for N seconds\n");
-            printf("  ipctest      - Run IPC test (Pipe, MQ, SharedMem)\n");
-            printf("  gui        - Start graphical UI (VBE mode)\n");
-            printf("  ls         - List files on disk\n");
-            printf("  cat <file> - Print file contents\n");
-            printf("  diskinfo   - Show disk/filesystem info\n");
-            printf("  pci        - List PCI devices\n");
-            printf("  net        - Show network config\n");
-            printf("  ping <ip>  - Send ICMP echo request\n");
-            printf("  send <ip> <port> <msg> - Send UDP packet\n");
-            printf("  recv <port> - Listen for UDP packets (5s)\n");
-            printf("  tcp-recv <port> - Listen for TCP connections (10s)\n");
-            printf("  dhcp       - Request IP via DHCP\n");
-            printf("  arp        - Show ARP cache\n");
-            printf("  arp -c     - Clear ARP cache\n");
-            printf("  netstat    - Show network statistics\n");
-            printf("  netstat -r - Reset network statistics\n");
-            printf("  rand       - Show a random number (PRNG)\n");
-            printf("  write <file> <text> - Write text to file (FAT16)\n");
-            printf("  rm <file>  - Delete a file from disk\n");
-            printf("  webserver  - Start HTTP server (port 80, hostfwd :8088)\n");
-            printf("  webserver stop - Stop HTTP server\n");
-            printf("  date       - Show current date/time (CMOS RTC)\n");
+        /* Run help as a user program */
+        run_help_user();
     } else if (strcmp(cmd, "clear") == 0) {
-        vga_clear_screen(VGA_COLOR_BLACK);
-        vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-        printf("TinyOS v0.1\n\n");
+        /* Run clear as a user program */
+        run_clear_user();
     } else if (strcmp(cmd, "uptime") == 0) {
         uint32_t ticks = timer_get_ticks();
         uint32_t secs = ticks / 50;
@@ -815,7 +780,8 @@ static void shell_handle_command(const char* cmd) {
     } else if (strncmp(cmd, "echo ", 5) == 0) {
         const char* text = cmd + 5;
         while (*text == ' ') text++;
-        printf("%s\n", text);
+        /* Run echo as a user program - passes args via user_cmd_args */
+        run_echo_user(text);
     } else if (strcmp(cmd, "pageinfo") == 0) {
         paging_dump_info();
     } else if (strcmp(cmd, "snake") == 0) {
@@ -840,7 +806,27 @@ static void shell_handle_command(const char* cmd) {
     } else if (strcmp(cmd, "gui") == 0) {
         cmd_gui();
     } else if (strcmp(cmd, "ls") == 0) {
-        fat16_list();
+        fat16_list_dir("");
+    } else if (strncmp(cmd, "ls ", 3) == 0) {
+        const char* path = cmd + 3;
+        while (*path == ' ') path++;
+        fat16_list_dir(path);
+    } else if (strncmp(cmd, "mkdir ", 6) == 0) {
+        const char* dirname = cmd + 6;
+        while (*dirname == ' ') dirname++;
+        if (*dirname == '\0') {
+            printf("Usage: mkdir <dirname>\n");
+        } else if (fat16_mkdir(dirname) == 0) {
+            printf("Directory created: %s\n", dirname);
+        }
+    } else if (strncmp(cmd, "rmdir ", 6) == 0) {
+        const char* dirname = cmd + 6;
+        while (*dirname == ' ') dirname++;
+        if (*dirname == '\0') {
+            printf("Usage: rmdir <dirname>\n");
+        } else if (fat16_rmdir(dirname) == 0) {
+            printf("Directory removed: %s\n", dirname);
+        }
     } else if (strncmp(cmd, "cat ", 4) == 0) {
         const char* fname = cmd + 4;
         while (*fname == ' ') fname++;
@@ -890,49 +876,97 @@ static void shell_handle_command(const char* cmd) {
         const char* ipstr = cmd + 5;
         while (*ipstr == ' ') ipstr++;
         uint32_t a, b, c, d;
+        uint32_t target_ip;
+        
         if (parse_ip(ipstr, &a, &b, &c, &d)) {
-            uint32_t target_ip = IP4(a, b, c, d);
-            printf("Pinging %u.%u.%u.%u...\n", a, b, c, d);
+            target_ip = IP4(a, b, c, d);
+        } else {
+            /* Try DNS resolution */
+            if (net_dns_query(ipstr, &target_ip) < 0) {
+                printf("Could not resolve: %s\n", ipstr);
+                printf("Usage: ping <ip> or ping <hostname>\n");
+            } else {
+                printf("Resolved %s -> %u.%u.%u.%u\n", ipstr,
+                       target_ip & 0xFF, (target_ip >> 8) & 0xFF,
+                       (target_ip >> 16) & 0xFF, (target_ip >> 24) & 0xFF);
+            }
+        }
+        
+        if (target_ip != 0) {
+            printf("Pinging %u.%u.%u.%u...\n",
+                   target_ip & 0xFF, (target_ip >> 8) & 0xFF,
+                   (target_ip >> 16) & 0xFF, (target_ip >> 24) & 0xFF);
 
             int ret = net_send_icmp_echo(target_ip, 1, 1);
             if (ret < 0) {
-                /* ARP not cached, poll for ARP reply */
                 uint32_t start = timer_get_ticks();
                 int resolved = 0;
-                while (timer_get_ticks() - start < 10) {  /* ~200ms at 50Hz */
+                while (timer_get_ticks() - start < 10) {
                     ne2000_poll_recv();
                     ret = net_send_icmp_echo(target_ip, 1, 1);
                     if (ret >= 0) { resolved = 1; break; }
                 }
                 if (resolved) {
-                    printf("Ping sent to %u.%u.%u.%u\n", a, b, c, d);
+                    printf("Ping sent to %u.%u.%u.%u\n",
+                           target_ip & 0xFF, (target_ip >> 8) & 0xFF,
+                           (target_ip >> 16) & 0xFF, (target_ip >> 24) & 0xFF);
                 } else {
-                    printf("ARP timeout: could not resolve %u.%u.%u.%u\n", a, b, c, d);
+                    printf("ARP timeout: could not resolve %u.%u.%u.%u\n",
+                           target_ip & 0xFF, (target_ip >> 8) & 0xFF,
+                           (target_ip >> 16) & 0xFF, (target_ip >> 24) & 0xFF);
                 }
             } else {
-                printf("Ping sent to %u.%u.%u.%u\n", a, b, c, d);
+                printf("Ping sent to %u.%u.%u.%u\n",
+                       target_ip & 0xFF, (target_ip >> 8) & 0xFF,
+                       (target_ip >> 16) & 0xFF, (target_ip >> 24) & 0xFF);
             }
-        } else {
-            printf("Usage: ping A.B.C.D\n");
         }
     } else if (strncmp(cmd, "send ", 5) == 0) {
-        /* send <ip> <port> <msg> */
+        /* send <ip|hostname> <port> <msg> */
         const char* arg = cmd + 5;
         while (*arg == ' ') arg++;
         uint32_t a, b, c, d;
+        uint32_t target_ip = 0;
+        int need_dns = 0;
+        char hostname[128];
+        hostname[0] = '\0';
+        
         if (parse_ip(arg, &a, &b, &c, &d)) {
+            target_ip = IP4(a, b, c, d);
             /* Skip past IP */
             while (*arg && *arg != ' ') arg++;
             while (*arg == ' ') arg++;
-            /* Parse port */
-            uint32_t port = 0;
-            while (*arg >= '0' && *arg <= '9') {
-                port = port * 10 + (*arg++ - '0');
+        } else {
+            /* Extract hostname up to next space */
+            int hi = 0;
+            while (*arg && *arg != ' ' && hi < 127) {
+                hostname[hi++] = *arg++;
             }
+            hostname[hi] = '\0';
             while (*arg == ' ') arg++;
-            /* Rest is message */
-            uint32_t target_ip = IP4(a, b, c, d);
+            need_dns = 1;
+        }
 
+        /* Parse port */
+        uint32_t port = 0;
+        while (*arg >= '0' && *arg <= '9') {
+            port = port * 10 + (*arg++ - '0');
+        }
+        while (*arg == ' ') arg++;
+
+        /* Try DNS if needed */
+        if (need_dns) {
+            if (net_dns_query(hostname, &target_ip) < 0) {
+                printf("Could not resolve: %s\n", hostname);
+                printf("Usage: send <ip|hostname> <port> <message>\n");
+            } else {
+                printf("Resolved %s -> %u.%u.%u.%u\n", hostname,
+                       target_ip & 0xFF, (target_ip >> 8) & 0xFF,
+                       (target_ip >> 16) & 0xFF, (target_ip >> 24) & 0xFF);
+            }
+        }
+
+        if (target_ip != 0) {
             int ret = net_send_udp(target_ip, (uint16_t)port, 1234, arg, strlen(arg));
             if (ret < 0) {
                 uint32_t start = timer_get_ticks();
@@ -943,15 +977,19 @@ static void shell_handle_command(const char* cmd) {
                     if (ret >= 0) { resolved = 1; break; }
                 }
                 if (resolved) {
-                    printf("Sent %u bytes to %u.%u.%u.%u:%u\n", strlen(arg), a, b, c, d, port);
+                    printf("Sent %u bytes to %u.%u.%u.%u:%u\n", strlen(arg),
+                           target_ip & 0xFF, (target_ip >> 8) & 0xFF,
+                           (target_ip >> 16) & 0xFF, (target_ip >> 24) & 0xFF, port);
                 } else {
-                    printf("ARP timeout: could not resolve %u.%u.%u.%u\n", a, b, c, d);
+                    printf("ARP timeout: could not resolve %u.%u.%u.%u\n",
+                           target_ip & 0xFF, (target_ip >> 8) & 0xFF,
+                           (target_ip >> 16) & 0xFF, (target_ip >> 24) & 0xFF);
                 }
             } else {
-                printf("Sent %u bytes to %u.%u.%u.%u:%u\n", strlen(arg), a, b, c, d, port);
+                printf("Sent %u bytes to %u.%u.%u.%u:%u\n", strlen(arg),
+                       target_ip & 0xFF, (target_ip >> 8) & 0xFF,
+                       (target_ip >> 16) & 0xFF, (target_ip >> 24) & 0xFF, port);
             }
-        } else {
-            printf("Usage: send A.B.C.D <port> <message>\n");
         }
     } else if (strncmp(cmd, "webserver", 9) == 0) {
         const char* arg = cmd + 9;

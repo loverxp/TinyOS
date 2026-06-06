@@ -373,15 +373,29 @@ user_main (Ring 3)
 
 ### 嵌入式用户程序的加载与执行
 
+用户程序源码在 `user/apps/` 下，通过 `user/build.bat` 编译为 ELF，内核通过 `incbin` 嵌入后执行。通用加载器 `run_embedded_elf()` 负责：
+- 解析 ELF 程序头（Program Headers）
+- 复制 LOAD 段到 p_vaddr (0x400000)
+- 清零 BSS 段
+- 分配 4KB 用户栈
+- 切换到 Ring 3 执行
+
 ```
 runuser 命令
   │
   └─ run_loaded_user()  [kernel/loader.c]
        │
-       ├─ 获取 incbin 嵌入的 ELF 二进制: embedded_user_start ~ embedded_user_end
-       │   └─ 定义于 kernel/embedded_user.asm (使用 incbin 嵌入 .elf)
+       └─ run_embedded_elf("gfxsnake", embedded_user_start, embedded_user_end)
+
+echo / clear / help 命令同理：
+  echo  → run_echo_user(text) → run_embedded_elf("echo.elf", ...)
+  clear → run_clear_user()    → run_embedded_elf("clear.elf", ...)
+  help  → run_help_user()     → run_embedded_elf("help.elf", ...)
        │
-       ├─ elf_load(embedded_user_start, size)  ← 解析 ELF 头
+       ├─ 获取 incbin 嵌入的 ELF 二进制: *_start ~ *_end
+       │   └─ 定义于 kernel/embedded_*.asm (使用 incbin 嵌入 .elf)
+       │
+       ├─ elf_load(binary_start, size)  ← 解析 ELF 头
        │   ├─ 验证 ELF 魔数、32-bit、Little Endian、i386
        │   ├─ 遍历 Program Headers
        │   ├─ 复制 PT_LOAD 段到 p_vaddr
@@ -403,7 +417,7 @@ runuser 命令
                  │
                  ├─ 清理 BSS 段
                  ├─ 调用 main()
-                 │   └─ (用户程序逻辑，如 hello.c)
+                 │   └─ (用户程序逻辑)
                  └─ 调用 exit() → syscall 0 → 返回内核态
                        │
                        ▼
@@ -417,38 +431,20 @@ runuser 命令
 ### 用户程序构建流程
 
 ```
-user/hello.c  +  user/crt0.s  +  user/libc/*.c
+user/apps/echo.c  +  user/apps/clear.c  +  user/apps/help.c
+user/libc/stdio.c +  user/libc/string.c +  user/libc/stdlib.c
+user/crt0.s
        │
        ├─ i686-elf-gcc (编译为 .o)
        └─ i686-elf-ld -T user.ld (链接为 ELF)
               │
               ▼
-       build/user/hello.elf
+       build/user/echo.elf  /  clear.elf  /  help.elf
               │
               ▼ (incbin 嵌入)
-       kernel/embedded_hello.asm
+       kernel/embedded_echo.asm  /  embedded_clear.asm  /  embedded_help.asm
               │
-              ▼ (编译)
-       build/embedded_hello_asm.o
-              │
-              ▼ (链接)
-       tinyos.bin
-       
-user/gfxsnake.c + user/crt0.s
-       │
-       ├─ i686-elf-gcc (编译为 .o)
-       └─ i686-elf-ld -T user.ld (链接为 ELF)
-              │
-              ▼
-       build/user/gfxsnake.elf
-              │
-              ▼ (incbin 嵌入)
-       kernel/embedded_user.asm
-              │
-              ▼ (编译)
-       build/embedded_user_asm.o
-              │
-              ▼ (链接)
+              ▼ (编译 + 链接)
        tinyos.bin
 ```
 
@@ -828,6 +824,8 @@ ATA 主通道 (I/O base = 0x1F0)
 
 ### FAT16 文件系统 (`kernel/fat16.c`)
 
+支持读写删除和子目录操作（路径解析、目录创建/删除）。
+
 ```
 磁盘布局 (16MB, 4 sectors/cluster):
 ┌─────────┬─────────┬─────────┬──────────────┐
@@ -850,15 +848,38 @@ fat16_read(entry, offset, buffer, size):
   └─> 逐扇区读取，处理跨 cluster 边界
 
 fat16_list():
-  └─> 遍历根目录，显示文件名、大小、类型
+  └─> 遍历根目录（或子目录），显示文件名、大小、类型
+
+--- 子目录扩展 ---
+fat16_resolve_path(path, parent_dir, name_component):
+  ├─> 跳过前导 '/'
+  ├─> 逐层解析：在每个目录中查找下一级目录项
+  └─> 返回最后一级的文件/目录信息
+
+fat16_mkdir(path):
+  ├─> fat16_resolve_path() 定位父目录
+  ├─> 分配簇 + 初始化 . 和 .. 目录项
+  └─> 父目录中创建新目录项
+
+fat16_rmdir(path):
+  ├─> fat16_resolve_path() 定位目录
+  ├─> 检查是否为空（仅 . 和 ..）
+  ├─> 释放簇链
+  └─> 标记目录项为空（0xE5）
 ```
 
 ### Shell 文件命令
 
 ```
 TinyOS> ls                    列出根目录所有文件
+TinyOS> ls DIR/SUBDIR         列出子目录内容
 TinyOS> cat readme.txt        读取并显示文件内容
+TinyOS> cat DIR/SUBDIR/FILE.TXT 读取子目录中的文件
+TinyOS> mkdir MYDIR           创建子目录
+TinyOS> rmdir MYDIR           删除空子目录
 TinyOS> diskinfo              显示 BPB 信息（大小、簇数、布局）
+TinyOS> write note.txt Hello  创建文件（支持路径）
+TinyOS> rm note.txt           删除文件（支持路径）
 ```
 
 ---
@@ -929,6 +950,13 @@ net_recv_handler(frame, len):  ← NE2000 回调
     ├─> build_ip_header(...)
     └─> ne2000_send(frame, len)
 
+DNS 解析流程 (ping/send 支持 hostname):
+  net_dns_query(hostname, &out_ip)
+    ├─> 构建 DNS 查询包（标准 DNS header + QNAME 编码）
+    ├─> 发送 UDP 到 10.0.2.3:53（QEMU 内置 DNS）
+    ├─> 等待/接收 DNS 响应
+    └─> 解析 A 记录 → out_ip
+
 ping/send 命令输出格式（[1/4] 分步显示）:
   [1/4] Target IP / Target: IP:Port
   [2/4] Route: 直接/网关 路由信息
@@ -942,6 +970,7 @@ ping/send 命令输出格式（[1/4] 分步显示）:
 TinyOS> pci                   列出所有 PCI 设备
 TinyOS> net                   显示网络配置 (IP/GW/Mask/MAC)
 TinyOS> ping 10.0.2.2         发送 ICMP echo (首次触发 ARP)
+TinyOS> ping example.com      支持域名（DNS 自动解析）
 TinyOS> send 10.0.2.2 8888 Hello   发送 UDP 数据包
 ```
 
@@ -1037,30 +1066,33 @@ boot.asm
 
 用户态切换 (testuser):
     kernel.c (test_user_mode)
-        └─ run_user_task() [user.asm]
-            └─ iret → Ring 3
-                └─ user_main
-                    ├─ syscall 1 → 打印
-                    ├─ hlt → GPF → 捕获并跳过
-                    └─ syscall 0 → 返回 Ring 0
-                        └─ user_exit_handler → 回到 kernel.c
+        └─> run_user_task() [user.asm]
+            └─> iret → Ring 3
+                └─> user_main
+                    ├─> syscall 1 → 打印
+                    ├─> hlt → GPF → 捕获并跳过
+                    └─> syscall 0 → 返回 Ring 0
+                        └─> user_exit_handler → 回到 kernel.c
 
-用户程序加载 (runuser / hello):
-    shell.c (runuser / hello 命令)
-        ├─ run_loaded_user() [loader.c]   ← 加载 gfxsnake.elf
-        └─ run_hello_user() [loader.c]    ← 加载 hello.elf
-            ├─ elf_load() [loader.c]        ← 解析 ELF Program Headers
-            │   ├─ 验证 ELF 头 (magic, 32-bit, LE, i386)
-            │   ├─ 遍历 PT_LOAD 段并复制到 p_vaddr
-            │   └─ 清零 BSS 段
-            ├─ pmm_alloc_page() [pmm.c]     ← 分配用户栈
-            ├─ printf() [stdio.c]           ← 输出加载信息
-            └─ run_user_task_ex() [user.asm] ← 使用 ELF e_entry
-                └─ iret → Ring 3
-                    └─ e_entry (_start, crt0.s) → main() → exit()
-                        └─ syscall 0 → 返回内核态
-                            └─ user_exit_handler → loader.c
-                                └─ pmm_free_page() [pmm.c]
+用户程序加载 (runuser / hello / echo / clear / help):
+    shell.c (命令分发)
+        ├─> run_loaded_user() [loader.c]   ← 加载 gfxsnake.elf
+        ├─> run_hello_user() [loader.c]    ← 加载 hello.elf
+        ├─> run_echo_user(text) [loader.c] ← 加载 echo.elf（参数通过 user_cmd_args）
+        ├─> run_clear_user() [loader.c]    ← 加载 clear.elf
+        └─> run_help_user() [loader.c]     ← 加载 help.elf
+            └─> run_embedded_elf(name, start, end) [loader.c]
+                └─> elf_load() [loader.c]  ← 解析 ELF Program Headers
+                    ├─> 验证 ELF 头 (magic, 32-bit, LE, i386)
+                    ├─> 遍历 PT_LOAD 段并复制到 p_vaddr
+                    └─> 清零 BSS 段
+                ├─> pmm_alloc_page() [pmm.c]     ← 分配用户栈
+                └─> run_user_task_ex() [user.asm] ← 使用 ELF e_entry
+                    └─> iret → Ring 3
+                        └─> e_entry (_start, crt0.s) → main() → exit()
+                            └─> syscall 0 → 返回内核态
+                                └─> user_exit_handler → loader.c
+                                    └─> pmm_free_page() [pmm.c]
 ```
 
 ---
