@@ -42,7 +42,10 @@ ASM_SRCS  = boot/boot.asm drivers/interrupts.asm drivers/gdt.asm \
             drivers/io.asm kernel/user.asm kernel/embedded_user.asm \
             kernel/embedded_hello.asm kernel/embedded_echo.asm \
             kernel/embedded_clear.asm kernel/embedded_help.asm \
-            kernel/embedded_forktest.asm kernel/switch.asm
+            kernel/embedded_forktest.asm \
+            kernel/embedded_uptime.asm kernel/embedded_date.asm \
+            kernel/embedded_rand.asm kernel/embedded_meminfo.asm \
+            kernel/embedded_diskinfo.asm kernel/switch.asm
 
 # Object files (all in build/; .asm -> _asm.o to avoid name collision with .c)
 C_OBJS    = $(patsubst %.c,$(BUILD)/%.o,$(notdir $(C_SRCS)))
@@ -91,6 +94,21 @@ $(BUILD)/embedded_help_asm.o: kernel/embedded_help.asm build/user/help.elf | $(B
 	$(AS) $(ASFLAGS) -o $@ $<
 
 $(BUILD)/embedded_forktest_asm.o: kernel/embedded_forktest.asm build/user/forktest.elf | $(BUILD)
+	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD)/embedded_uptime_asm.o: kernel/embedded_uptime.asm build/user/uptime.elf | $(BUILD)
+	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD)/embedded_date_asm.o: kernel/embedded_date.asm build/user/date.elf | $(BUILD)
+	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD)/embedded_rand_asm.o: kernel/embedded_rand.asm build/user/rand.elf | $(BUILD)
+	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD)/embedded_meminfo_asm.o: kernel/embedded_meminfo.asm build/user/meminfo.elf | $(BUILD)
+	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD)/embedded_diskinfo_asm.o: kernel/embedded_diskinfo.asm build/user/diskinfo.elf | $(BUILD)
 	$(AS) $(ASFLAGS) -o $@ $<
 
 # Compile C files: map e.g. kernel/kernel.c -> build/kernel.o

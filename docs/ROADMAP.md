@@ -143,8 +143,9 @@ struct page_directory_entry {
 **目标**：支持 `printf` 风格格式化
 
 - [x] `sprintf()` / `printf()` 实现
-- [x] 支持 `%d`, `%x`, `%s`, `%c`, `%p`
-- [x] 格式化数字显示（十进制/十六进制）
+- [x] 支持 `%d`, `%u`, `%x`, `%s`, `%c`, `%p`
+- [x] 格式化数字显示（十进制/十六进制/无符号）
+- [x] 宽度和零填充修饰符支持（如 `%02u`, `%04x`）
 
 ---
 
@@ -290,6 +291,7 @@ struct page_directory_entry {
 
 - [x] 命令解析
 - [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `hello`, `forktest`, `ls [path]`, `cat <path>`, `mkdir <path>`, `rmdir <path>`, `write <path>`, `rm <path>`, `diskinfo`, `pci`, `net`, `ping <ip|hostname>`, `send <ip|hostname>`, `recv`, `arp`, `netstat`, `rand`, `dhcp`, `tcp-recv`, `ipctest`
+  - 已迁移到 Ring 3 用户态：`help`, `clear`, `echo`, `hello`, `uptime`, `date`, `rand`, `meminfo`, `diskinfo` (通过 syscall 27 get_system_info 查询系统信息)
 - [x] 程序执行：`fork` (syscall 25) + `exec` (syscall 26)
 - [x] 管道支持：`cmd1 | cmd2`（基于 Pipe IPC + I/O 重定向）
   - Shell 解析 `|` 分隔的多条命令
@@ -308,12 +310,19 @@ struct page_directory_entry {
 - [x] **格式化输出**
   - `printf(fmt, ...)` - 基于 syscall 7 实现
   - `sprintf(buf, fmt, ...)` - 格式化到字符串
-  - 支持 `%d`, `%x`, `%s`, `%c`, `%p`
+  - 支持 `%d`, `%u`, `%x`, `%s`, `%c`, `%p`
 - [x] **待扩展**
   - `malloc(size)` / `free(ptr)` - 堆分配器 ✅ 已实现
   - `write(fd, buf, len)` - 文件 I/O
   - `scanf` - 格式化输入 ✅ 已实现
   - `getchar` / `readline` / `get_cmdline` / `clear_screen` 系统调用 ✅ 已实现
+
+#### 近期修复记录
+- **`%u` 格式符缺失修复** (2025-06-06):
+  - 问题：用户态 libc 的 `vsprintf()` 未实现 `%u` 格式说明符，`uptime`/`date`/`rand`/`meminfo`/`diskinfo` 等命令输出"一堆 u"
+  - 原因：`switch` 语句中缺少 `case 'u'`，落到 `default` 分支原样输出 `u`；`%02u` 变成 `02u`
+  - 修复：在 [user/libc/stdio.c](file:///d:/Codes/Learning/TinyOS/user/libc/stdio.c#L66-L75) 中新增 `case 'u'` 分支，实现无符号整数格式化（类似 `%d`，去掉负数处理）
+  - 影响范围：用户态 libc 的 printf/sprintf 系列函数均受益，内核态 lib （`lib/stdio.c`）此前已支持 `%u`
 
 ---
 
@@ -370,6 +379,8 @@ struct page_directory_entry {
 - [x] **DHCP 客户端** — 自动获取 IP/网关/掩码，替代硬编码 10.0.2.15 ✅ 已实现（`dhcp` 命令）
 - [x] **DNS 解析** — 支持域名到 IP 的解析（查询 10.0.2.3）✅ 已实现
 - [x] **Shell 命令迁移到用户态** — echo/clear/help 作为 Ring 3 ELF 程序运行 ✅ 已实现
+- [x] **get_system_info 通用系统调用** — syscall 27，支持 5 种信息查询类型：uptime (0)、date (1)、rand (2)、meminfo (3)、diskinfo (4) ✅ 已实现
+- [x] **命令迁移到 Ring 3** — uptime/date/rand/meminfo/diskinfo 已作为独立 ELF 用户程序运行，通过 syscall 27 查询系统信息 ✅ 已实现
 - [x] **TCP 协议栈**
   - 三次握手（SYN → SYN-ACK → ACK），连接状态机
   - 序列号/确认号管理 + 校验和（复用 IP 校验和函数）

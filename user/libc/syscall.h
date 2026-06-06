@@ -84,4 +84,19 @@ static inline void exec(uint32_t entry, uint32_t user_esp) {
         : : "r"(entry), "r"(user_esp) : "eax", "ebx", "ecx", "memory");
 }
 
+/* Get system information.
+ * type: 0=uptime(ticks), 1=date(rtc_time_t), 2=rand(uint32_t),
+ *       3=meminfo(4*uint32_t), 4=diskinfo(5*uint32_t)
+ * Returns bytes written to buffer.
+ */
+static inline int get_system_info(uint32_t type, void* buf, uint32_t max_len) {
+    uint32_t result;
+    /* Load inputs FIRST, then set eax, to prevent the compiler
+     * from reusing eax (the output register) for an input operand. */
+    asm volatile("mov %1, %%ebx; mov %2, %%ecx; mov %3, %%edx; mov $27, %%eax; int $0x80"
+        : "=a"(result) : "r"(type), "r"((uint32_t)buf), "r"(max_len)
+        : "ebx", "ecx", "edx", "memory");
+    return (int)result;
+}
+
 #endif /* SYSCALL_H */

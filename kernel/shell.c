@@ -29,6 +29,22 @@
 
 #define LINE_BUF_SIZE 256
 
+/* ── Shell History & Line Editing ─────────────────────────────────── */
+
+#define HISTORY_SIZE 16
+
+static char history[HISTORY_SIZE][LINE_BUF_SIZE];
+static int history_count = 0;         /* total entries stored */
+static int history_cur = 0;           /* index for next write (circular) */
+static int history_pos = 0;           /* history_count = new input, 0..N-1 = browsing */
+static char saved_input[LINE_BUF_SIZE]; /* save current line when browsing history */
+static int saved_pos = 0;
+static int input_row = -1;            /* VGA row where prompt ends (for redisplay) */
+static int input_col = -1;            /* VGA col where prompt ends */
+static int prev_buf_len = 0;          /* previous buffer length for clearing */
+
+static void shell_raw_callback(uint8_t scancode, uint8_t extended);
+
 /* ── Shell Pipeline Support ───────────────────────────────────────────
  * Parse '|' operator: cmd1 | cmd2 [ | cmd3 ... ]
  * Creates pipes between adjacent commands, redirects stdout of each
@@ -165,9 +181,158 @@ static size_t line_pos = 0;
 /* Command line arguments buffer, accessible to syscall 23 (get_cmdline) */
 char user_cmd_args[256];
 
+/* ── Shell History Implementation ────────────────────────────────── */
+
+static void history_add(const char* cmd) {
+    if (*cmd == '\0') return;
+    int last_idx = (history_cur - 1 + HISTORY_SIZE) % HISTORY_SIZE;
+    if (history_count > 0 && strcmp(history[last_idx], cmd) == 0) return;
+    strncpy(history[history_cur], cmd, LINE_BUF_SIZE - 1);
+    history[history_cur][LINE_BUF_SIZE - 1] = '\0';
+    history_cur = (history_cur + 1) % HISTORY_SIZE;
+    if (history_count < HISTORY_SIZE) history_count++;
+    history_pos = history_count;
+}
+
+static const char* history_get(int pos) {
+    if (pos < 0 || pos >= history_count) return NULL;
+    int idx = (history_cur - history_count + pos + HISTORY_SIZE) % HISTORY_SIZE;
+    return history[idx];
+}
+
+static void shell_redisplay(void) {
+    if (input_row < 0) return;
+    vga_set_cursor(input_row, input_col);
+    int clear_len = prev_buf_len > LINE_BUF_SIZE ? LINE_BUF_SIZE : prev_buf_len;
+    for (int i = 0; i < clear_len; i++) vga_putchar(' ');
+    vga_set_cursor(input_row, input_col);
+    int max_cols = VGA_WIDTH - input_col;
+    int pos = (int)line_pos;
+    int display_len = pos < max_cols ? pos : max_cols;
+    for (int i = 0; i < display_len; i++) vga_putchar(line_buffer[i]);
+    prev_buf_len = pos;
+    int cursor_col = input_col + (pos < max_cols ? pos : max_cols);
+    vga_set_cursor(input_row, cursor_col);
+}
+
+static void history_navigate(int dir) {
+    if (history_count == 0) return;
+    if (dir < 0) {
+        if (history_pos == history_count) {
+            strncpy(saved_input, line_buffer, LINE_BUF_SIZE - 1);
+            saved_input[LINE_BUF_SIZE - 1] = '\0';
+            saved_pos = line_pos;
+            history_pos = history_count - 1;
+        } else if (history_pos > 0) {
+            history_pos--;
+        } else { return; }
+    } else {
+        if (history_pos < history_count - 1) {
+            history_pos++;
+        } else if (history_pos == history_count - 1) {
+            history_pos = history_count;
+            strncpy(line_buffer, saved_input, LINE_BUF_SIZE - 1);
+            line_buffer[LINE_BUF_SIZE - 1] = '\0';
+            line_pos = saved_pos;
+            shell_redisplay();
+            return;
+        } else { return; }
+    }
+    const char* entry = history_get(history_pos);
+    if (entry) {
+        strncpy(line_buffer, entry, LINE_BUF_SIZE - 1);
+        line_buffer[LINE_BUF_SIZE - 1] = '\0';
+        line_pos = strlen(line_buffer);
+        shell_redisplay();
+    }
+}
+
+/* ── Tab Completion ──────────────────────────────────────────────── */
+
+static const char* builtin_commands[] = {
+    "help","clear","uptime","meminfo","alloc","free","except",
+    "kmtest","echo","testuser","runuser","hello","forktest",
+    "schedtest","ipctest","ls","cat","mkdir","rmdir",
+    "write","rm","diskinfo","pci","net","ping","send","recv",
+    "arp","netstat","rand","dhcp","tcp-recv","webserver","date",
+    "snake","gfxsnake","gtest","gui","pageinfo", NULL
+};
+
+/* Forward declaration */
+static void shell_prompt(void);
+
+static void shell_tab_complete(void) {
+    if (line_pos == 0) return;
+    int word_start = 0;
+    for (int i = line_pos - 1; i >= 0; i--) {
+        if (line_buffer[i] == ' ') { word_start = i + 1; break; }
+    }
+    for (int i = 0; i < word_start; i++) {
+        if (line_buffer[i] != ' ') return;
+    }
+    const char* prefix = line_buffer;
+    int prefix_len = line_pos;
+    const char* match = NULL;
+    int match_len = 0, match_count = 0;
+    const char** cmd = builtin_commands;
+    while (*cmd) {
+        if (strncmp(*cmd, prefix, prefix_len) == 0) {
+            match_count++; match = *cmd; match_len = strlen(*cmd);
+        }
+        cmd++;
+    }
+    if (match_count == 0) return;
+    if (match_count == 1) {
+        strncpy(line_buffer, match, LINE_BUF_SIZE - 1);
+        line_buffer[LINE_BUF_SIZE - 1] = '\0';
+        line_pos = match_len;
+        if (line_pos < LINE_BUF_SIZE - 2) line_buffer[line_pos++] = ' ';
+        line_buffer[line_pos] = '\0';
+        shell_redisplay();
+    } else {
+        int common = match_len;
+        cmd = builtin_commands;
+        int first = 1;
+        while (*cmd) {
+            if (strncmp(*cmd, prefix, prefix_len) == 0) {
+                if (first) { common = strlen(*cmd); first = 0; }
+                else {
+                    int len = strlen(*cmd);
+                    for (int i = 0; i < common && i < len; i++) {
+                        if ((*cmd)[i] != match[i]) { common = i; break; }
+                    }
+                }
+            }
+            cmd++;
+        }
+        if (common > prefix_len) {
+            strncpy(line_buffer, match, common);
+            line_buffer[common] = '\0';
+            line_pos = common;
+            shell_redisplay();
+        } else {
+            printf("\n");
+            cmd = builtin_commands;
+            while (*cmd) {
+                if (strncmp(*cmd, prefix, prefix_len) == 0) printf("  %s\n", *cmd);
+                cmd++;
+            }
+            shell_prompt();
+            for (int i = 0; i < (int)line_pos; i++) vga_putchar(line_buffer[i]);
+            prev_buf_len = (int)line_pos;
+            input_row = vga_get_cursor_row();
+            input_col = vga_get_cursor_column();
+        }
+    }
+}
+
 static void shell_prompt(void) {
     vga_writestring("TinyOS> ");
     serial_writestring("TinyOS> ");
+    /* Save input start position for redisplay */
+    input_row = vga_get_cursor_row();
+    input_col = vga_get_cursor_column();
+    prev_buf_len = 0;
 }
 
 /* UDP recv callback for the 'recv' command — prints received data to screen */
@@ -210,14 +375,52 @@ static void shell_tcp_recv_cb(uint32_t src_ip, uint16_t src_port,
     printf("\n");
 }
 
+/* Raw scancode callback for shell — handles extended keys (arrows, Home, End) */
+static void shell_raw_callback(uint8_t scancode, uint8_t extended) {
+    if (!extended) return;  /* Only handle extended keys (0xE0 prefix) */
+    (void)scancode;
+
+    switch (scancode) {
+        case 0x48:  /* Up arrow — history older */
+            history_navigate(-1);
+            break;
+        case 0x50:  /* Down arrow — history newer */
+            history_navigate(1);
+            break;
+        case 0x47:  /* Home — move cursor to beginning */
+            if (line_pos > 0) {
+                line_pos = 0;
+                vga_set_cursor(input_row, input_col);
+            }
+            break;
+        case 0x4F:  /* End — move cursor to end */
+        {
+            int len = 0;
+            while (line_buffer[len]) len++;
+            if (len < LINE_BUF_SIZE) {
+                line_pos = len;
+                int max_cols = VGA_WIDTH - input_col;
+                int disp = len < max_cols ? len : max_cols;
+                vga_set_cursor(input_row, input_col + disp);
+            }
+            break;
+        }
+    }
+}
+
 void shell_char_callback(char c) {
     if (c == '\n' || c == '\r') {
         vga_putchar('\n');
         serial_putchar('\n');
         line_buffer[line_pos] = '\0';
+        /* Add to history before executing */
+        history_add(line_buffer);
         shell_handle_command(line_buffer);
         line_pos = 0;
         shell_prompt();
+    } else if (c == '\t') {
+        /* Tab completion */
+        shell_tab_complete();
     } else if (c == '\b' || c == 127) {
         if (line_pos > 0) {
             line_pos--;
@@ -225,12 +428,14 @@ void shell_char_callback(char c) {
             serial_putchar('\b');
             serial_putchar(' ');
             serial_putchar('\b');
+            prev_buf_len = line_pos;
         }
     } else if (c >= 32 && c < 127) {
         if (line_pos < LINE_BUF_SIZE - 1) {
             line_buffer[line_pos++] = c;
             vga_putchar(c);
             serial_putchar(c);
+            prev_buf_len = line_pos;
         }
     }
 }
@@ -497,7 +702,7 @@ static void snake_start(int mode) {
     }
     
     timer_register_tick_callback(NULL);
-    keyboard_register_raw_callback(NULL);
+    keyboard_register_raw_callback(shell_raw_callback);
     keyboard_register_char_callback(shell_char_callback);
     
     vga_clear_screen(VGA_COLOR_BLACK);
@@ -827,7 +1032,7 @@ static void cmd_gui(void) {
     /* ── Cleanup and return to text mode ── */
     disable_interrupts();
 
-    keyboard_register_raw_callback(NULL);
+    keyboard_register_raw_callback(shell_raw_callback);
     keyboard_register_char_callback(shell_char_callback);
 
     /* Disable mouse IRQ and unregister callback */
@@ -863,19 +1068,11 @@ static void shell_handle_command(const char* cmd) {
         /* Run clear as a user program */
         run_clear_user();
     } else if (strcmp(cmd, "uptime") == 0) {
-        uint32_t ticks = timer_get_ticks();
-        uint32_t secs = ticks / 50;
-        uint32_t ms = (ticks % 50) * 20;
-        printf("Uptime: %u.%u seconds\n", secs, ms);
+        /* Run uptime as a user program */
+        run_uptime_user();
     } else if (strcmp(cmd, "meminfo") == 0) {
-        uint32_t total_kb = pmm_get_total_memory_kb();
-        uint32_t free_pg = pmm_get_free_pages();
-        uint32_t used_pg = pmm_get_used_pages();
-        uint32_t total_pg = pmm_get_total_pages();
-        printf("Memory:\n");
-        printf("  Total: %u MB (%u pages)\n", total_kb / 1024, total_pg);
-        printf("  Used:  %u pages (%u KB)\n", used_pg, used_pg * 4);
-        printf("  Free:  %u pages (%u KB)\n", free_pg, free_pg * 4);
+        /* Run meminfo as a user program */
+        run_meminfo_user();
     } else if (strncmp(cmd, "alloc", 5) == 0) {
         uint32_t count = 1;
         const char* arg = cmd + 5;
@@ -981,17 +1178,8 @@ static void shell_handle_command(const char* cmd) {
             printf("File not found: %s\n", fname);
         }
     } else if (strcmp(cmd, "diskinfo") == 0) {
-        const fat16_bpb_t* b = fat16_get_bpb();
-        if (!b) {
-            printf("No filesystem mounted\n");
-        } else {
-            printf("Disk info:\n");
-            printf("  Total size:      %u KB\n", b->total_size / 1024);
-            printf("  Bytes/sector:    %u\n", b->bytes_per_sector);
-            printf("  Sectors/cluster: %u\n", b->sectors_per_cluster);
-            printf("  Total clusters:  %u\n", b->total_clusters);
-            printf("  Root entries:    %u\n", b->root_entry_count);
-        }
+        /* Run diskinfo as a user program */
+        run_diskinfo_user();
     } else if (strcmp(cmd, "pci") == 0) {
         pci_list_devices();
     } else if (strcmp(cmd, "net") == 0) {
@@ -1136,11 +1324,8 @@ static void shell_handle_command(const char* cmd) {
             webserver_start();
         }
     } else if (strcmp(cmd, "date") == 0) {
-        rtc_time_t tm;
-        rtc_read_time(&tm);
-        printf("%04u-%02u-%02u %02u:%02u:%02u\n",
-               tm.year, tm.month, tm.day,
-               tm.hour, tm.minute, tm.second);
+        /* Run date as a user program */
+        run_date_user();
     } else if (strncmp(cmd, "arp", 3) == 0) {
         const char* arg = cmd + 3;
         while (*arg == ' ') arg++;
@@ -1202,8 +1387,8 @@ static void shell_handle_command(const char* cmd) {
             shell_prompt();
         }
     } else if (strcmp(cmd, "rand") == 0) {
-        prng_seed(timer_get_ticks());
-        printf("%u\n", prng_next());
+        /* Run rand as a user program */
+        run_rand_user();
     } else if (strncmp(cmd, "write ", 6) == 0) {
         /* write <file> [text] — if text omitted, read from stdin_pipe (pipeline) */
         const char* arg = cmd + 6;
@@ -1316,6 +1501,7 @@ static void shell_handle_command(const char* cmd) {
 
 void shell_init(void) {
     keyboard_register_char_callback(shell_char_callback);
+    keyboard_register_raw_callback(shell_raw_callback);
     serial_register_callback(shell_char_callback);
     shell_prompt();
 }

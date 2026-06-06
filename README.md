@@ -42,16 +42,20 @@
 | ------------- | ----------------------- |
 | `help`        | 显示所有可用命令                |
 | `clear`       | 清屏                      |
-| `uptime`      | 显示系统运行时间                |
-| `meminfo`     | 显示物理内存信息                |
+| `hello`       | 运行 Ring 3 示例用户程序（使用 libc） |
+| `echo <文本>`   | 回显输入的文本（Ring 3 用户程序执行）                 |
+| `uptime`      | 显示系统运行时间（Ring 3 用户程序）               |
+| `date`        | 显示当前日期/时间（Ring 3 用户程序）   |
+| `rand`        | 生成 xorshift32 随机数（Ring 3 用户程序）  |
+| `meminfo`     | 显示物理内存信息（Ring 3 用户程序）                |
+| `diskinfo`    | 显示磁盘/文件系统信息（Ring 3 用户程序）              |
+| `forktest`    | 测试 fork/exec/yield/exit 流程 |
 | `alloc <N>`   | 分配 N 个物理页（默认 1）         |
 | `free 0xADDR` | 释放指定地址的物理页              |
 | `kmtest`      | 运行 kmalloc/kfree 堆分配器测试 |
 | `except`      | 触发除零异常测试异常处理            |
-| `echo <文本>`   | 回显输入的文本（Ring 3 用户程序执行）                 |
 | `testuser`    | 切换到 Ring 3（用户态）并返回      |
 | `runuser`     | 加载并执行嵌入式用户程序           |
-| `hello`       | 运行 Ring 3 示例用户程序（使用 libc） |
 | `pageinfo`    | 显示页表信息                    |
 | `schedtest [N]`| 启动调度器测试 N 秒（默认 10）     |
 | `snake`       | 文本模式贪吃蛇游戏               |
@@ -65,7 +69,6 @@
 | `rmdir <路径>`  | 删除空子目录（支持路径）           |
 | `write <路径> <文本>` | 创建或覆写文件（支持路径）       |
 | `rm <路径>`    | 删除文件（支持路径）               |
-| `diskinfo`    | 显示磁盘/文件系统信息              |
 | **网络**       |                         |
 | `pci`         | 列出所有 PCI 设备               |
 | `net`         | 显示网络配置 (IP/网关/MAC)     |
@@ -73,7 +76,6 @@
 | `send <IP|hostname> <端口> <消息>` | 发送 UDP 数据包（支持域名）        |
 | `webserver`   | 启动 HTTP 服务器（端口 80，宿主机 :8088 转发） |
 | `webserver stop` | 停止 HTTP 服务器              |
-| `date`        | 显示当前日期/时间（CMOS RTC）   |
 
 ## 功能特性
 
@@ -101,15 +103,16 @@
 - ✅ 物理内存管理（PMM，位图式页帧分配器）
 - ✅ 分页机制（页目录/页表，identity map 前 8MB）
 - ✅ 堆内存分配器（kmalloc/kfree，块式管理）
-- ✅ printf/sprintf 格式化输出（%s, %d, %u, %x, %02x, %04x, %c, %p）
+- ✅ printf/sprintf 格式化输出（%s, %d, %u, %02x, %04x, %08x, %c, %p）
 - ✅ 用户态标准库 libc（printf, scanf, sprintf, exit, 字符串函数，malloc/free）
 - ✅ 用户 I/O 系统调用（getchar, readline, get_cmdline, clear_screen）
+- ✅ 系统信息查询系统调用（syscall 27, get_system_info，5 种系统数据类型：uptime/date/rand/meminfo/diskinfo）
 - ✅ 交互式 Shell（多命令支持）
 - ✅ 系统调用（int 0x80，支持从用户态返回内核态）
 - ✅ 抢占式多任务调度器（Round-Robin，IRQ0 驱动）
 - ✅ yield/sleep 系统调用（协作式多任务）
 - ✅ 进程间通信 IPC（Pipe 管道、Message Queue 消息队列、Shared Memory 共享内存）
-- ✅ 用户程序框架（ELF 加载器，Ring 3 执行，echo/clear/help 已迁移为用户程序）
+- ✅ 用户程序框架（ELF 加载器，Ring 3 执行，11 个用户程序已迁移：hello/echo/clear/help/uptime/date/rand/meminfo/diskinfo/forktest/gfxsnake）
 - ✅ 串口调试输出
 - ✅ 串口 Shell（COM1 中断收发，与 VGA 键盘双终端并行）
 - ✅ ATA PIO 磁盘驱动（主 IDE 通道，28-bit LBA）
@@ -148,6 +151,12 @@ TinyOS/
 │   ├── embedded_echo.asm  # 嵌入的 echo.elf
 │   ├── embedded_clear.asm # 嵌入的 clear.elf
 │   ├── embedded_help.asm  # 嵌入的 help.elf
+│   ├── embedded_forktest.asm # 嵌入的 forktest.elf
+│   ├── embedded_uptime.asm # 嵌入的 uptime.elf
+│   ├── embedded_date.asm  # 嵌入的 date.elf
+│   ├── embedded_rand.asm  # 嵌入的 rand.elf
+│   ├── embedded_meminfo.asm # 嵌入的 meminfo.elf
+│   └── embedded_diskinfo.asm # 嵌入的 diskinfo.elf
 │   └── user.asm           # 用户态入口和切换逻辑
 ├── user/
 │   ├── crt0.s             # 用户程序启动代码
@@ -156,12 +165,18 @@ TinyOS/
 │   ├── apps/              # 用户程序源码
 │   │   ├── echo.c         # echo 命令用户程序
 │   │   ├── clear.c        # clear 命令用户程序
-│   │   └── help.c         # help 命令用户程序
+│   │   ├── help.c         # help 命令用户程序
+│   │   ├── uptime.c       # uptime 命令用户程序
+│   │   ├── date.c         # date 命令用户程序
+│   │   ├── rand.c         # rand 命令用户程序
+│   │   ├── meminfo.c      # meminfo 命令用户程序
+│   │   ├── diskinfo.c     # diskinfo 命令用户程序
+│   │   └── forktest.c     # forktest 命令用户程序
 │   ├── libc/              # 用户态标准库
 │   │   ├── stdio.c        # printf/scanf/sprintf 实现
 │   │   ├── stdlib.c       # malloc/free/exit 等工具函数
 │   │   ├── string.c       # 字符串与内存操作
-│   │   └── syscall.h      # 系统调用封装（syscalls 0-24）
+│   │   └── syscall.h      # 系统调用封装（syscalls 0-27）
 │   ├── user.ld            # 用户程序链接脚本（加载地址 0x400000）
 │   └── build.bat          # 用户程序构建脚本（编译 libc + apps → ELF）
 ├── drivers/

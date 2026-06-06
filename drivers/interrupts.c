@@ -5,6 +5,11 @@
 #include "../include/except.h"
 #include "../include/scheduler.h"
 #include "../include/ipc.h"
+#include "../include/rtc.h"
+#include "../include/pmm.h"
+#include "../include/prng.h"
+#include "../include/fat16.h"
+#include "../include/debug.h"
 
 // External user-mode exit handlers (defined in user.asm)
 extern void forked_task_exit_handler(void);
@@ -863,6 +868,66 @@ void syscall_handler(uint32_t* regs) {
         // Syscall 24: clear_screen() - clear VGA text screen
         vga_clear_screen(VGA_COLOR_BLACK);
         vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+        return;
+    }
+
+    if (syscall_no == 27) {
+        // Syscall 27: get_system_info(type, buffer, max_len)
+        // type: 0=uptime, 1=date, 2=rand, 3=meminfo, 4=diskinfo
+        // Returns bytes written to buffer, or 0 on failure
+        uint32_t info_type = arg1;
+        void* buf = (void*)arg2;
+        uint32_t max = arg3;
+
+        /* Debug: print syscall params */
+        KDBG("sys27", "type=%u buf=0x%x max=%u", info_type, (uint32_t)buf, max);
+
+        if (!buf || max == 0) { regs[8] = 0; return; }
+
+        if (info_type == 0) {
+            /* Uptime: return ticks (uint32_t) */
+            if (max < sizeof(uint32_t)) { regs[8] = 0; return; }
+            uint32_t ticks = timer_get_ticks();
+            *(uint32_t*)buf = ticks;
+            regs[8] = sizeof(uint32_t);
+        } else if (info_type == 1) {
+            /* Date/time: return rtc_time_t */
+            if (max < sizeof(rtc_time_t)) { regs[8] = 0; return; }
+            rtc_read_time((rtc_time_t*)buf);
+            regs[8] = sizeof(rtc_time_t);
+        } else if (info_type == 2) {
+            /* Random number: seed with ticks, return uint32_t */
+            if (max < sizeof(uint32_t)) { regs[8] = 0; return; }
+            prng_seed(timer_get_ticks());
+            *(uint32_t*)buf = prng_next();
+            regs[8] = sizeof(uint32_t);
+        } else if (info_type == 3) {
+            /* Memory info: total_pages, free_pages, used_pages, total_kb */
+            uint32_t meminfo[4];
+            meminfo[0] = pmm_get_total_pages();
+            meminfo[1] = pmm_get_free_pages();
+            meminfo[2] = pmm_get_used_pages();
+            meminfo[3] = pmm_get_total_memory_kb();
+            uint32_t copy_size = max < sizeof(meminfo) ? max : sizeof(meminfo);
+            memcpy(buf, meminfo, copy_size);
+            regs[8] = copy_size;
+        } else if (info_type == 4) {
+            /* Disk info: total_size, bytes_per_sector, sectors_per_cluster,
+             * total_clusters, root_entry_count */
+            const fat16_bpb_t* bpb = fat16_get_bpb();
+            if (!bpb) { regs[8] = 0; return; }
+            uint32_t dinfo[5];
+            dinfo[0] = bpb->total_size;
+            dinfo[1] = bpb->bytes_per_sector;
+            dinfo[2] = bpb->sectors_per_cluster;
+            dinfo[3] = bpb->total_clusters;
+            dinfo[4] = bpb->root_entry_count;
+            uint32_t copy_size = max < sizeof(dinfo) ? max : sizeof(dinfo);
+            memcpy(buf, dinfo, copy_size);
+            regs[8] = copy_size;
+        } else {
+            regs[8] = 0;  /* Unknown type */
+        }
         return;
     }
 

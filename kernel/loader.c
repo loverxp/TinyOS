@@ -36,6 +36,18 @@ extern uint8_t embedded_help_end[];
 extern uint8_t embedded_forktest_start[];
 extern uint8_t embedded_forktest_end[];
 
+// Embedded uptime/date/rand/meminfo/diskinfo
+extern uint8_t embedded_uptime_start[];
+extern uint8_t embedded_uptime_end[];
+extern uint8_t embedded_date_start[];
+extern uint8_t embedded_date_end[];
+extern uint8_t embedded_rand_start[];
+extern uint8_t embedded_rand_end[];
+extern uint8_t embedded_meminfo_start[];
+extern uint8_t embedded_meminfo_end[];
+extern uint8_t embedded_diskinfo_start[];
+extern uint8_t embedded_diskinfo_end[];
+
 // External assembly functions
 extern void vga_initialize(void);
 extern void vga_set_color(enum vga_color fg, enum vga_color bg);
@@ -303,4 +315,24 @@ void run_help_user(void) {
 
 void run_forktest_user(void) {
     run_embedded_elf("forktest.elf", embedded_forktest_start, embedded_forktest_end);
+}
+
+void run_uptime_user(void) {
+    run_embedded_elf("uptime.elf", embedded_uptime_start, embedded_uptime_end);
+}
+
+void run_date_user(void) {
+    run_embedded_elf("date.elf", embedded_date_start, embedded_date_end);
+}
+
+void run_rand_user(void) {
+    run_embedded_elf("rand.elf", embedded_rand_start, embedded_rand_end);
+}
+
+void run_meminfo_user(void) {
+    run_embedded_elf("meminfo.elf", embedded_meminfo_start, embedded_meminfo_end);
+}
+
+void run_diskinfo_user(void) {
+    run_embedded_elf("diskinfo.elf", embedded_diskinfo_start, embedded_diskinfo_end);
 }

@@ -103,4 +103,64 @@ echo Converting: forktest.bin
 %OBJCOPY% -O binary %OUT%\forktest.elf %OUT%\forktest.bin
 if errorlevel 1 exit /b 1
 
-echo Done: hello.bin, gfxsnake.bin, echo.bin, clear.bin, help.bin, forktest.bin
+echo Building user: uptime
+%GCC% %CFLAGS% -c apps\uptime.c -o %OUT%\uptime.o
+if errorlevel 1 exit /b 1
+
+echo Linking: uptime.elf
+%LD% %LDFLAGS% -o %OUT%\uptime.elf %OUT%\uptime.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: uptime.bin
+%OBJCOPY% -O binary %OUT%\uptime.elf %OUT%\uptime.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: date
+%GCC% %CFLAGS% -c apps\date.c -o %OUT%\date.o
+if errorlevel 1 exit /b 1
+
+echo Linking: date.elf
+%LD% %LDFLAGS% -o %OUT%\date.elf %OUT%\date.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: date.bin
+%OBJCOPY% -O binary %OUT%\date.elf %OUT%\date.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: rand
+%GCC% %CFLAGS% -c apps\rand.c -o %OUT%\rand.o
+if errorlevel 1 exit /b 1
+
+echo Linking: rand.elf
+%LD% %LDFLAGS% -o %OUT%\rand.elf %OUT%\rand.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: rand.bin
+%OBJCOPY% -O binary %OUT%\rand.elf %OUT%\rand.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: meminfo
+%GCC% %CFLAGS% -c apps\meminfo.c -o %OUT%\meminfo.o
+if errorlevel 1 exit /b 1
+
+echo Linking: meminfo.elf
+%LD% %LDFLAGS% -o %OUT%\meminfo.elf %OUT%\meminfo.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: meminfo.bin
+%OBJCOPY% -O binary %OUT%\meminfo.elf %OUT%\meminfo.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: diskinfo
+%GCC% %CFLAGS% -c apps\diskinfo.c -o %OUT%\diskinfo.o
+if errorlevel 1 exit /b 1
+
+echo Linking: diskinfo.elf
+%LD% %LDFLAGS% -o %OUT%\diskinfo.elf %OUT%\diskinfo.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: diskinfo.bin
+%OBJCOPY% -O binary %OUT%\diskinfo.elf %OUT%\diskinfo.bin
+if errorlevel 1 exit /b 1
+
+echo Done: hello.bin, gfxsnake.bin, echo.bin, clear.bin, help.bin, forktest.bin, uptime.bin, date.bin, rand.bin, meminfo.bin, diskinfo.bin

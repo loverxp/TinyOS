@@ -1052,3 +1052,58 @@ PS/2 鼠标在初始化后会发送一个或多个包含初始状态的基准数
 
 ### 状态
 搁置。鼠标在短暂跳动后即可正常使用，不影响功能。
+
+---
+
+## 问题29：用户程序调用 syscall 27 返回"系统调用失败"
+
+### 现象
+`uptime`、`date`、`rand`、`meminfo`、`diskinfo` 等 Ring 3 用户程序运行后打印："uptime: system call failed"（及对应命令的失败消息）。
+
+### 调试过程
+1. 用户程序调用 `get_system_info(0, &ticks, sizeof(ticks))` 返回 0
+2. 用户程序检查返回值 `< sizeof(uint32_t)` → 打印 "system call failed"
+3. `get_system_info()` 通过 syscall 27 (`int 0x80` with `eax=27`) 进入内核
+
+### 根本原因
+**syscall 27 (`get_system_info`) 的内核处理代码与用户程序同时新增，但初始构建时内核未包含该 handler。**
+
+实际触发路径：
+1. 用户程序执行 `mov $27, %%eax; int $0x80`
+2. 内核 `syscall_handler()` 中没有 `case 27` 分支（handler 是新添加的代码）
+3. 落到末尾的 "unknown syscall" 处理：打印 `[Syscall] #27 from user mode (unknown)`
+4. 函数返回时 **未设置 `regs[8]`（EAX 返回值）**，剩余为垃圾值或 0
+5. 用户程序收到 0，判定为"调用失败"
+
+> 注：因为 5 个用户程序（uptime/date/rand/meminfo/diskinfo）和 syscall 27 handler 是在同一批改提交中添加的，如果用户只增量构建（`make`）而非全量重新构建（`make rebuild`），内核二进制不会包含新的 handler，导致"系统调用失败"。
+
+### 修复
+- **场景修复**：执行 `make rebuild` 清理并全部重新编译（或 `make clean && make`），确保内核包含 syscall 27 handler
+- **代码健壮性修复**：syscall handler 末尾的 unknown syscall 分支应设置 `regs[8] = 0` 给调用者明确的失败返回值，而非留垃圾值
+
+### 涉及文件
+- `drivers/interrupts.c` — `syscall_handler()` 函数，新增 `case 27` 分支（约第 874 行）
+- 新增头文件引用：`rtc.h`、`pmm.h`、`prng.h`、`fat16.h`、`debug.h`
+
+### 后续
+修复了"系统调用失败"后，`rebuild` 后的命令输出变为"一堆 u"（详见问题30）。
+
+---
+
+## 问题30：用户程序输出 "一堆 u"（%u 格式符缺失）
+
+### 现象
+`uptime`、`date`、`rand`、`meminfo`、`diskinfo` 等用户态命令在修复 syscall 27 后，输出显示为大量 `u` 字符，而非正常数值。例如 `Uptime: u.u seconds`。
+
+### 根本原因
+**用户态 libc 的 `vsprintf()` 未实现 `%u` 格式说明符。**
+
+这些命令在内核态 `lib/stdio.c` 的 `printf()` 中正常运行（内核态已支持 `%u`），但迁移为 Ring 3 用户程序后，改用用户态 libc 的 `printf()`（在 `user/libc/stdio.c` 中）。该实现的 `switch` 语句中缺少 `case 'u'` 分支，遇到 `%u` 时落到 `default` 分支，将 `u` 字符原样输出。
+
+### 解决
+在 `user/libc/stdio.c` 的 `vsprintf()` 中添加 `case 'u'` 分支，补全无符号整数格式化逻辑。
+
+### 影响范围
+- 用户态 libc 的 `printf()` / `sprintf()` / `vsprintf()` 全部受影响
+- 内核态 lib 的 `printf()` / `sprintf()` 不受影响（已正确实现 `%u`）
+- 涉及命令：`uptime`、`date`、`rand`、`meminfo`、`diskinfo`

@@ -63,6 +63,17 @@ int vsprintf(char* buf, const char* fmt, va_list args) {
                 while (i > 0) *p++ = tmp[--i];
                 break;
             }
+            case 'u': {
+                unsigned int v = va_arg(args, unsigned int);
+                char tmp[32];
+                int i = 0, wi;
+                if (v == 0) tmp[i++] = '0';
+                while (v > 0) { tmp[i++] = '0' + (v % 10); v /= 10; }
+                wi = i;
+                while (wi < width) { *p++ = zero_pad ? '0' : ' '; wi++; }
+                while (i > 0) *p++ = tmp[--i];
+                break;
+            }
             case 'x': case 'X': {
                 uint32_t v = va_arg(args, uint32_t);
                 char tmp[16];

@@ -37,12 +37,18 @@ nasm -f elf32 kernel/embedded_hello.asm -o build/embedded_hello_asm.o
 nasm -f elf32 kernel/embedded_echo.asm -o build/embedded_echo_asm.o
 nasm -f elf32 kernel/embedded_clear.asm -o build/embedded_clear_asm.o
 nasm -f elf32 kernel/embedded_help.asm -o build/embedded_help_asm.o
+nasm -f elf32 kernel/embedded_forktest.asm -o build/embedded_forktest_asm.o
+nasm -f elf32 kernel/embedded_uptime.asm -o build/embedded_uptime_asm.o
+nasm -f elf32 kernel/embedded_date.asm -o build/embedded_date_asm.o
+nasm -f elf32 kernel/embedded_rand.asm -o build/embedded_rand_asm.o
+nasm -f elf32 kernel/embedded_meminfo.asm -o build/embedded_meminfo_asm.o
+nasm -f elf32 kernel/embedded_diskinfo.asm -o build/embedded_diskinfo_asm.o
 
 # 编译 C 文件
 i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c <file.c> -o <file.o>
 
 # 链接
-i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/interrupts_asm.o build/gdt_asm.o build/io_asm.o build/user_asm.o build/embedded_user_asm.o build/embedded_hello_asm.o build/embedded_echo_asm.o build/embedded_clear_asm.o build/embedded_help_asm.o build/switch_asm.o build/kernel.o build/shell.o build/except.o build/gdt.o build/tss.o build/pmm.o build/paging.o build/mm.o build/loader.o build/scheduler.o build/ipc.o build/fat16.o build/net.o build/wm.o build/webserver.o build/vga.o build/keyboard.o build/timer.o build/interrupts.o build/ata.o build/pci.o build/ne2000.o build/serial.o build/vbe.o build/framebuf.o build/mouse.o build/builtin_font.o build/rtc.o build/string.o build/stdio.o build/prng.o build/debug.o
+i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/interrupts_asm.o build/gdt_asm.o build/io_asm.o build/user_asm.o build/embedded_user_asm.o build/embedded_hello_asm.o build/embedded_echo_asm.o build/embedded_clear_asm.o build/embedded_help_asm.o build/embedded_forktest_asm.o build/embedded_uptime_asm.o build/embedded_date_asm.o build/embedded_rand_asm.o build/embedded_meminfo_asm.o build/embedded_diskinfo_asm.o build/switch_asm.o build/kernel.o build/shell.o build/except.o build/gdt.o build/tss.o build/pmm.o build/paging.o build/mm.o build/loader.o build/scheduler.o build/ipc.o build/fat16.o build/net.o build/wm.o build/webserver.o build/vga.o build/keyboard.o build/timer.o build/interrupts.o build/ata.o build/pci.o build/ne2000.o build/serial.o build/vbe.o build/framebuf.o build/mouse.o build/builtin_font.o build/rtc.o build/string.o build/stdio.o build/prng.o build/debug.o
 
 ### 运行
 ```batch
@@ -51,8 +57,8 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 
 ## 项目结构
 - `boot/`: 启动代码
-- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, paging.c, mm.c, except.c, loader.c, scheduler.c, ipc.c, fat16.c, net.c, wm.c, webserver.c, embedded_user.asm, embedded_hello.asm, embedded_echo.asm, embedded_clear.asm, embedded_help.asm, user.asm, switch.asm）
-- `user/`: 用户程序与 libc（apps/echo.c, apps/clear.c, apps/help.c, apps/snake.c, libc/stdio.c, libc/string.c, libc/stdlib.c, libc/syscall.h, crt0.s, user.ld, build.bat）
+- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, paging.c, mm.c, except.c, loader.c, scheduler.c, ipc.c, fat16.c, net.c, wm.c, webserver.c, embedded_user.asm, embedded_hello.asm, embedded_echo.asm, embedded_clear.asm, embedded_help.asm, embedded_forktest.asm, embedded_uptime.asm, embedded_date.asm, embedded_rand.asm, embedded_meminfo.asm, embedded_diskinfo.asm, user.asm, switch.asm）
+- `user/`: 用户程序与 libc（apps/echo.c, apps/clear.c, apps/help.c, apps/snake.c, apps/uptime.c, apps/date.c, apps/rand.c, apps/meminfo.c, apps/diskinfo.c, libc/stdio.c, libc/string.c, libc/stdlib.c, libc/syscall.h, crt0.s, user.ld, build.bat）
 - `drivers/`: 设备驱动（VGA、键盘、定时器、中断、GDT、串口、I/O、ATA、PCI、NE2000、VBE、帧缓冲、鼠标、内建字模、RTC）
 - `lib/`: 库函数（字符串处理、printf/sprintf 格式化输出、PRNG、调试框架）
 - `include/`: 头文件
@@ -65,12 +71,12 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - `drivers/gdt.asm` / `kernel/gdt.c`: GDT 定义与初始化
 - `kernel/tss.c`: TSS 初始化，管理 Ring 3→Ring 0 栈切换
 - `kernel/user.asm`: 用户态入口、Ring 3 切换及退出（含自定义栈版本 `run_user_task_ex`）
-- `kernel/loader.c`: 用户程序加载器，ELF 加载、Ring 3 执行（含通用 `run_embedded_elf`、`run_echo_user`、`run_clear_user`、`run_help_user`）
+- `kernel/loader.c`: 用户程序加载器，ELF 加载、Ring 3 执行（含通用 `run_embedded_elf`、`run_echo_user`、`run_clear_user`、`run_help_user`、`run_uptime_user`、`run_date_user`、`run_rand_user`、`run_meminfo_user`、`run_diskinfo_user`）
 - `kernel/embedded_user.asm`: 使用 `incbin` 嵌入 gfxsnake 用户程序二进制
-- `kernel/embedded_hello.asm` / `kernel/embedded_echo.asm` / `kernel/embedded_clear.asm` / `kernel/embedded_help.asm`: 使用 `incbin` 嵌入 hello/echo/clear/help 用户程序 ELF
-- `include/loader.h`: 加载器 API 声明（run_loaded_user, run_hello_user, run_echo_user, run_clear_user, run_help_user）
+- `kernel/embedded_hello.asm` / `kernel/embedded_echo.asm` / `kernel/embedded_clear.asm` / `kernel/embedded_help.asm` / `kernel/embedded_forktest.asm` / `kernel/embedded_uptime.asm` / `kernel/embedded_date.asm` / `kernel/embedded_rand.asm` / `kernel/embedded_meminfo.asm` / `kernel/embedded_diskinfo.asm`: 使用 `incbin` 嵌入对应用户程序 ELF
+- `include/loader.h`: 加载器 API 声明（run_loaded_user, run_hello_user, run_echo_user, run_clear_user, run_help_user, run_uptime_user, run_date_user, run_rand_user, run_meminfo_user, run_diskinfo_user）
 - `user/libc/`: 用户态 libc（stdio.c, string.c, stdlib.c, syscall.h），通过 int 0x80 系统调用与内核交互
-- `user/apps/`: 用户程序源码（echo.c, clear.c, help.c, snake.c/gfxsnake.c）
+- `user/apps/`: 用户程序源码（echo.c, clear.c, help.c, snake.c/gfxsnake.c, uptime.c, date.c, rand.c, meminfo.c, diskinfo.c）
 - `user/crt0.s`: 用户程序启动代码（清 BSS → call main → syscall 0 退出）
 - `user/user.ld`: 用户程序链接脚本（加载地址 0x400000）
 - `user/build.bat`: 用户程序编译脚本（编译 libc + 各 app → 链接 ELF → objcopy 转二进制）
@@ -130,7 +136,7 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - **schedtest 命令**: `schedtest [N]` 创建两个测试线程交替打印 A/B，N 秒后自动退出（默认 10 秒，上限 300 秒）。任务通过 `task_exit()` 标记 FINISHED
 - **IPC 阻塞与唤醒**: `ipc_block()` 将当前任务设为 BLOCKED 并记录 `ipc_wait_obj`/`ipc_wait_type`，然后 halt 等待。数据到达后 `ipc_wake()` 调用 `scheduler_wake_ipc()` 遍历任务数组精确唤醒匹配等待者和等待类型的任务。IPC 阻塞的任务 `sleep_deadline=0`，不会被定时器唤醒逻辑误触
 - **gfxsnake**: 新版 VGA Mode 13h 像素模式贪吃蛇，作为用户程序在 Ring 3 运行，使用系统调用切换视频模式和读取输入
-- **用户命令迁移到 Ring 3**: echo/clear/help 三个命令已作为独立 ELF 用户程序运行（嵌入内核二进制）。通过 `run_embedded_elf()` 通用加载器执行，参数通过 `user_cmd_args` 缓冲区 + syscall 23 (`get_cmdline`) 传递
+- **用户命令迁移到 Ring 3**: echo/clear/help/hello/forktest/uptime/date/rand/meminfo/diskinfo 已作为独立 ELF 用户程序运行（嵌入内核二进制）。通过 `run_embedded_elf()` 通用加载器执行，参数通过 `user_cmd_args` 缓冲区 + syscall 23 (`get_cmdline`) 传递。系统信息命令通过 syscall 27 (`get_system_info`) 查询内核数据
 - **用户程序构建流程**: `user/build.bat` 编译 libc（stdio/string/stdlib）+ apps 源码 → i686-elf-ld 链接 → objcopy 转 ELF → kernel .asm 通过 `incbin` 嵌入
 - **VGA 字模恢复机制**: Mode 13h (chain-4) 写入 `0xA0000` 时会破坏 VGA plane 2 的字体数据。内核在开机时调用 `vga_save_font()` 保存 4096 字节字模到缓冲区，切换回文本模式时由 `vga_set_mode03h()` 调用 `vga_restore_font()` 恢复
 - **VGA Mode 13h 初始化顺序**: Misc Output → Sequencer (复位→编程→释放) → Graphics Controller → CRTC (解锁→编程→上锁) → Attribute Controller (编程→重新使能) → DAC 调色板。顺序错误会导致黑屏或花屏
@@ -169,10 +175,29 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - **Syscall 23**: `get_cmdline(buf, max)` — 从 `user_cmd_args` 缓冲区获取当前用户命令的参数
 - **Syscall 24**: `clear_screen()` — 清空 VGA 文本屏幕
 
+## 系统信息查询（syscall 27）
+- **Syscall 27**: `get_system_info(type, buf, max_len)` — 统一系统信息查询接口，返回 5 种数据类型：
+  - **类型 0 (uptime)**: 返回 `uint32_t ticks`（定时器 ticks，50Hz），用户程序换算为秒.毫秒
+  - **类型 1 (date)**: 返回 `rtc_time_t` 结构（year/month/day/hour/minute/second）
+  - **类型 2 (rand)**: 返回 `uint32_t` 随机数（基于 timer ticks 种子的 xorshift32）
+  - **类型 3 (meminfo)**: 返回 4 × `uint32_t` 数组（总页数、空闲页数、已用页数、总容量 MB）
+  - **类型 4 (diskinfo)**: 返回 5 × `uint32_t` 数组（磁盘总字节数、扇区大小、每簇扇区数、总簇数、根目录项数）
+- 调用方式：`int ret = get_system_info(type, &buf, sizeof(buf))`，返回实际写入字节数，失败返回 0
+- 调用示例（用户程序）：
+  ```c
+  // 查询系统运行时间
+  uint32_t ticks;
+  if (get_system_info(0, &ticks, sizeof(ticks)) >= sizeof(ticks)) {
+      uint32_t secs = ticks / 50;
+      uint32_t ms = (ticks % 50) * 20;
+      printf("Uptime: %u.%u seconds\n", secs, ms);
+  }
+  ```
+
 ## 用户态 libc
 - **printf/puts/putchar**: 通过 syscall 7 (`console_write`) 输出到 VGA + 串口
 - **scanf**: 基于 `readline` 的格式化输入，支持 `%d %u %x %s %c`
-- **sprintf/vsprintf**: 内存格式化（支持 `%d %x %s %c %p`、零填充、宽度对齐）
+- **sprintf/vsprintf**: 内存格式化（支持 `%d %u %x %s %c %p`、零填充、宽度对齐）
 - **malloc/free**: 简单的 bump allocator
 - **memcpy/memset/memcmp/strlen/strcpy/strncpy**: 内存和字符串操作
 
@@ -189,6 +214,23 @@ i686-elf-ld -T linker.ld -nostdlib -o build/tinyos.bin build/boot_asm.o build/in
 - 分配 4KB 用户栈
 - EOI IRQ1 后切换到 Ring 3
 - 用户程序退出（syscall 0）后恢复 VGA 文本模式和 shell
+
+## 用户态命令列表
+以下用户程序已作为独立 Ring 3 ELF 嵌入内核，通过 `run_embedded_elf()` 加载执行：
+
+| 命令 | 功能 | 系统调用 | 源文件 |
+|------|------|----------|--------|
+| `hello` | 打印 "Hello from userspace!" | syscall 7 (printf) | [hello.c](file:///d:/Codes/Learning/TinyOS/user/apps/hello.c) |
+| `echo [text]` | 回显参数 | syscall 23 (get_cmdline) | [echo.c](file:///d:/Codes/Learning/TinyOS/user/apps/echo.c) |
+| `clear` | 清空 VGA 文本屏幕 | syscall 24 (clear_screen) | [clear.c](file:///d:/Codes/Learning/TinyOS/user/apps/clear.c) |
+| `help` | 显示命令帮助列表 | syscall 7 (printf) | [help.c](file:///d:/Codes/Learning/TinyOS/user/apps/help.c) |
+| `uptime` | 显示系统运行时间（秒.毫秒） | syscall 27 type=0 | [uptime.c](file:///d:/Codes/Learning/TinyOS/user/apps/uptime.c) |
+| `date` | 显示 RTC 日期时间 | syscall 27 type=1 | [date.c](file:///d:/Codes/Learning/TinyOS/user/apps/date.c) |
+| `rand` | 生成 xorshift32 随机数 | syscall 27 type=2 | [rand.c](file:///d:/Codes/Learning/TinyOS/user/apps/rand.c) |
+| `meminfo` | 显示物理内存使用情况 | syscall 27 type=3 | [meminfo.c](file:///d:/Codes/Learning/TinyOS/user/apps/meminfo.c) |
+| `diskinfo` | 显示 FAT16 磁盘信息 | syscall 27 type=4 | [diskinfo.c](file:///d:/Codes/Learning/TinyOS/user/apps/diskinfo.c) |
+| `forktest` | 测试 fork/exec/yield/exit 流程 | syscall 25/26/8/0 | [forktest.c](file:///d:/Codes/Learning/TinyOS/user/apps/forktest.c) |
+| `gfxsnake` | VGA Mode 13h 贪吃蛇游戏 | syscall 21/22/24 | [gfxsnake.c](file:///d:/Codes/Learning/TinyOS/user/apps/gfxsnake.c) |
 
 ## IPC 进程间通信
 - **Pipe**（管道）: 512 字节环形缓冲区，最多 8 个。`pipe_create()` / `read()` / `write()` / `close()`。空时阻塞读者，满时阻塞写者

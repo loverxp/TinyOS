@@ -21,4 +21,19 @@ void run_help_user(void);
 // Load and run the forktest user program (tests fork syscall)
 void run_forktest_user(void);
 
+// Load and run the uptime user program
+void run_uptime_user(void);
+
+// Load and run the date user program
+void run_date_user(void);
+
+// Load and run the rand user program
+void run_rand_user(void);
+
+// Load and run the meminfo user program
+void run_meminfo_user(void);
+
+// Load and run the diskinfo user program
+void run_diskinfo_user(void);
+
 #endif // LOADER_H

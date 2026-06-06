@@ -285,35 +285,36 @@ isr13 stub → isr_common_stub
 ### 系统调用流程 (int 0x80)
 
 ```
-用户态: mov eax, 0  ; syscall number
-        int 0x80    ; 触发系统调用
+用户态: mov eax, <syscall_no>  ; syscall number
+        int 0x80               ; 触发系统调用
 
 CPU 切换到 TSS.ESP0 (内核栈)
   │
   ▼
-isr128 stub (interrupts.asm):
-  ├─ cli
-  ├─ push 0          ; 虚拟错误码
-  ├─ push 128        ; 向量号
-  ├─ pusha           ; 保存寄存器
-  ├─ push ds         ; 保存数据段
-  ├─ 设置内核段
-  ├─ push regs_ptr
-  └─ call syscall_handler(regs)
-       │
-       ▼
-     syscall_handler(regs)
-       │
-       ├─ regs[8] = EAX = syscall number
-       │
-       ├─ syscall 0: 返回内核态
-       │   ├─ regs[11] = (uint32_t)user_exit_handler  ← EIP
-       │   └─ regs[12] = 0x08                         ← CS (内核代码段)
-       │
-       └─ syscall 1: 打印消息
-           └─ vga_writestring("[Syscall] #1 from user mode\n")
-               
-返回 → pop ds → popa → add esp,8 → iret
+isr128 stub (interrupts.asm) → syscall_handler(regs)
+
+已实现的系统调用：
+  syscall  0: exit()            — 用户程序退出，返回内核态
+  syscall  1: console_putchar() — 输出一个字符到 VGA + 串口
+  syscall  6: debug_print()     — 输出字符串到串口
+  syscall  7: console_write()   — 输出字符串到 VGA
+  syscall  8: yield()           — 主动让出 CPU
+  syscall  9: sleep(ms)         — 睡眠指定毫秒数
+  syscall 10-13: Pipe 操作      — create/read/write/close
+  syscall 14-17: MQ 操作        — create/send/recv/close
+  syscall 18-20: SHM 操作       — create/open/close
+  syscall 21: getchar()         — 阻塞读取一个按键
+  syscall 22: readline()        — 阻塞读取一行输入
+  syscall 23: get_cmdline()     — 获取当前命令参数
+  syscall 24: clear_screen()    — 清屏
+  syscall 25: fork()            — 创建子进程
+  syscall 26: exec()            — 加载并执行新程序
+  syscall 27: get_system_info() — 系统信息查询接口
+      类型 0: uptime   → 获取系统运行时间 (timer ticks)
+      类型 1: date     → 获取 RTC 日期时间
+      类型 2: rand     → 获取随机数 (xorshift32)
+      类型 3: meminfo  → 获取物理内存使用情况
+      类型 4: diskinfo → 获取 FAT16 磁盘信息
 ```
 
 ---
@@ -387,10 +388,17 @@ runuser 命令
        │
        └─ run_embedded_elf("gfxsnake", embedded_user_start, embedded_user_end)
 
-echo / clear / help 命令同理：
-  echo  → run_echo_user(text) → run_embedded_elf("echo.elf", ...)
-  clear → run_clear_user()    → run_embedded_elf("clear.elf", ...)
-  help  → run_help_user()     → run_embedded_elf("help.elf", ...)
+用户态命令（通过 run_embedded_elf 通用加载器）：
+  echo    → run_echo_user(text)   → run_embedded_elf("echo.elf", ...)
+  clear   → run_clear_user()      → run_embedded_elf("clear.elf", ...)
+  help    → run_help_user()       → run_embedded_elf("help.elf", ...)
+  hello   → run_hello_user()      → run_embedded_elf("hello.elf", ...)
+  uptime  → run_uptime_user()     → run_embedded_elf("uptime.elf", ...)
+  date    → run_date_user()       → run_embedded_elf("date.elf", ...)
+  rand    → run_rand_user()       → run_embedded_elf("rand.elf", ...)
+  meminfo → run_meminfo_user()    → run_embedded_elf("meminfo.elf", ...)
+  diskinfo→ run_diskinfo_user()   → run_embedded_elf("diskinfo.elf", ...)
+  forktest→ run_forktest_user()   → run_embedded_elf("forktest.elf", ...)
        │
        ├─ 获取 incbin 嵌入的 ELF 二进制: *_start ~ *_end
        │   └─ 定义于 kernel/embedded_*.asm (使用 incbin 嵌入 .elf)
@@ -431,7 +439,9 @@ echo / clear / help 命令同理：
 ### 用户程序构建流程
 
 ```
-user/apps/echo.c  +  user/apps/clear.c  +  user/apps/help.c
+user/apps/echo.c  +  user/apps/clear.c  +  user/apps/help.c  +  user/apps/uptime.c
+user/apps/date.c  +  user/apps/rand.c   +  user/apps/meminfo.c + user/apps/diskinfo.c
+user/apps/forktest.c
 user/libc/stdio.c +  user/libc/string.c +  user/libc/stdlib.c
 user/crt0.s
        │
@@ -439,10 +449,12 @@ user/crt0.s
        └─ i686-elf-ld -T user.ld (链接为 ELF)
               │
               ▼
-       build/user/echo.elf  /  clear.elf  /  help.elf
+       build/user/*.elf  (echo.elf, clear.elf, help.elf, uptime.elf, date.elf, ...)
               │
               ▼ (incbin 嵌入)
        kernel/embedded_echo.asm  /  embedded_clear.asm  /  embedded_help.asm
+       kernel/embedded_uptime.asm / embedded_date.asm / embedded_rand.asm
+       kernel/embedded_meminfo.asm / embedded_diskinfo.asm / embedded_forktest.asm
               │
               ▼ (编译 + 链接)
        tinyos.bin
