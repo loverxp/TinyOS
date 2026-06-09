@@ -88,7 +88,8 @@ qemu-system-i386.exe -kernel build/tinyos.bin -m 32
 - `kernel/embedded_user.asm`: 使用 `incbin` 嵌入 gfxsnake 用户程序二进制
 - `kernel/embedded_hello.asm` / `kernel/embedded_echo.asm` / `kernel/embedded_clear.asm` / `kernel/embedded_help.asm` / `kernel/embedded_forktest.asm` / `kernel/embedded_uptime.asm` / `kernel/embedded_date.asm` / `kernel/embedded_rand.asm` / `kernel/embedded_meminfo.asm` / `kernel/embedded_diskinfo.asm`: 使用 `incbin` 嵌入对应用户程序 ELF
 - `include/loader.h`: 加载器 API 声明（run_loaded_user, run_hello_user, run_echo_user, run_clear_user, run_help_user, run_uptime_user, run_date_user, run_rand_user, run_meminfo_user, run_diskinfo_user）
-- `user/libc/`: 用户态 libc（stdio.c, string.c, stdlib.c, syscall.h），通过 int 0x80 系统调用与内核交互
+- `user/libc/`: 用户态 libc（stdio.c, string.c, stdlib.c, errno.c, termios.c, syscall.h），通过 int 0x80 系统调用与内核交互
+- `user/include/`: 用户态头文件（errno.h, termios.h, unistd.h, fcntl.h, stdint.h, stddef.h, stdarg.h, stdio.h, stdlib.h, string.h, syscall.h）— POSIX 兼容层
 - `user/apps/`: 用户程序源码（echo.c, clear.c, help.c, snake.c/gfxsnake.c, uptime.c, date.c, rand.c, meminfo.c, diskinfo.c）
 - `user/crt0.s`: 用户程序启动代码（清 BSS → call main → syscall 0 退出）
 - `user/user.ld`: 用户程序链接脚本（加载地址 0x400000）
@@ -202,10 +203,12 @@ qemu-system-i386.exe -kernel build/tinyos.bin -m 32
 - **sprintf/vsprintf**: 内存格式化（支持 `%d %u %x %s %c %p`、零填充、宽度对齐）
 - **malloc/free**: 简单的 bump allocator
 - **memcpy/memset/memcmp/strlen/strcpy/strncpy**: 内存和字符串操作
+- **errno**: 全局 `errno` 变量，`set_errno()`/`get_errno()` 封装，POSIX 错误码定义（EPERM~ENOSYS）
+- **termios**: 终端控制（`tcgetattr`/`tcsetattr`/`cfmakeraw`），通过 VFS syscall 存/取/设置终端属性
 
 ## 用户程序框架
 用户程序入口在 `user/apps/`，编译流程：
-1. 编译 libc（stdio/string/stdlib）
+1. 编译 libc（stdio/string/stdlib/errno/termios）
 2. 编译 app 源码（如 echo.c → echo.o）
 3. 链接 ELF（crt0.o + app.o + libc → echo.elf，加载地址 0x400000）
 4. objcopy 转二进制备用

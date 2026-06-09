@@ -12,7 +12,7 @@ if not exist %OBJCOPY% set OBJCOPY=..\tools\i686-elf-objcopy.exe
 set OUT=..\build\user
 if not exist %OUT% mkdir %OUT%
 
-set CFLAGS=-m32 -mgeneral-regs-only -ffreestanding -O2 -Wall -Wextra -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -I libc
+set CFLAGS=-m32 -mgeneral-regs-only -ffreestanding -O2 -Wall -Wextra -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -I libc -I include
 set LDFLAGS=-T user.ld -nostdlib
 
 echo Building user: crt0.o
@@ -29,7 +29,13 @@ if errorlevel 1 exit /b 1
 %GCC% %CFLAGS% -c libc\string.c -o %OUT%\libc_string.o
 if errorlevel 1 exit /b 1
 
-set LIBC=%OUT%\libc_stdio.o %OUT%\libc_stdlib.o %OUT%\libc_string.o
+%GCC% %CFLAGS% -c libc\errno.c -o %OUT%\libc_errno.o
+if errorlevel 1 exit /b 1
+
+%GCC% %CFLAGS% -c libc\termios.c -o %OUT%\libc_termios.o
+if errorlevel 1 exit /b 1
+
+set LIBC=%OUT%\libc_stdio.o %OUT%\libc_stdlib.o %OUT%\libc_string.o %OUT%\libc_errno.o %OUT%\libc_termios.o
 
 echo Building user: hello
 %GCC% %CFLAGS% -c hello.c -o %OUT%\hello.o
