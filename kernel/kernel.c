@@ -19,6 +19,7 @@
 #include "../include/serial.h"
 #include "../include/vbe.h"
 #include "../include/ipc.h"
+#include "../include/mbr.h"
 
 // User mode entry points (from user.asm)
 extern void run_user_task(void (*entry)(void));
@@ -150,6 +151,13 @@ void kernel_main(uint32_t multiboot_info_addr) {
     if (ata_init() == 0) {
         printf("[OK] ATA disk detected\n");
         serial_writestring("[OK] ATA\n");
+
+        /* Parse MBR partition table */
+        mbr_info_t* mbr = mbr_get_info();
+        if (mbr_init(mbr) == 0) {
+            printf("[OK] MBR: %d partition(s), FAT16 at index %d\n",
+                   mbr->count, mbr->fat16_partition);
+        }
 
         /* Initialize FAT16 filesystem */
         if (fat16_init() == 0) {

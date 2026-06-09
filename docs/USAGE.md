@@ -212,6 +212,16 @@ Done listening on TCP port 80.
 TinyOS> pci
 ```
 
+**`partitions` — 显示 MBR 分区表**
+```
+TinyOS> partitions
+MBR Partition Table:
+Idx  Boot Type           Start(LBA)   Size(MB)
+----------------------------------------------
+0    Yes  FAT16 LBA             2048         16
+```
+> 读取磁盘扇区 0 (MBR)，解析分区表并显示各分区的类型、起始 LBA 和大小。支持识别 FAT12/16/32、NTFS、Linux 等常见分区类型。
+
 #### HTTP GET 请求
 
 **`http-get <host> [port] [path]` — HTTP GET 请求客户端**

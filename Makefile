@@ -35,7 +35,7 @@ BUILD = build
 C_SRCS    = kernel/kernel.c kernel/shell.c kernel/except.c kernel/gdt.c \
             kernel/tss.c kernel/pmm.c kernel/paging.c kernel/mm.c kernel/loader.c \
             kernel/scheduler.c kernel/ipc.c kernel/fat16.c kernel/net.c kernel/wm.c \
-            kernel/webserver.c kernel/httpclient.c \
+            kernel/webserver.c kernel/httpclient.c kernel/mbr.c \
             drivers/vga.c drivers/keyboard.c drivers/timer.c drivers/interrupts.c \
             drivers/ata.c drivers/pci.c drivers/ne2000.c drivers/serial.c \
             drivers/vbe.c drivers/framebuf.c drivers/mouse.c drivers/builtin_font.c \

@@ -241,7 +241,7 @@ struct page_directory_entry {
 
 - [x] IDE 硬盘驱动（ATA PIO 模式）
 - [ ] DMA 模式（性能优化）
-- [ ] 磁盘分区支持
+- [x] **MBR 磁盘分区支持**（`kernel/mbr.c`，读取扇区 0 解析分区表，识别 FAT16 分区类型，`partitions` 命令列出分区信息）
 
 ### 3.3 高级文件系统
 
@@ -290,7 +290,7 @@ struct page_directory_entry {
 **目标**：命令行解释器
 
 - [x] 命令解析
-- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `hello`, `forktest`, `ls [path]`, `cat <path>`, `mkdir <path>`, `rmdir <path>`, `write <path>`, `rm <path>`, `diskinfo`, `pci`, `net`, `ping <ip|hostname>`, `send <ip|hostname>`, `recv`, `arp`, `netstat`, `rand`, `dhcp`, `tcp-recv`, `http-get`, `ipctest`
+- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `hello`, `forktest`, `ls [path]`, `cat <path>`, `mkdir <path>`, `rmdir <path>`, `write <path>`, `rm <path>`, `diskinfo`, `pci`, `partitions`, `net`, `ping <ip|hostname>`, `send <ip|hostname>`, `recv`, `arp`, `netstat`, `rand`, `dhcp`, `tcp-recv`, `http-get`, `ipctest`
   - 已迁移到 Ring 3 用户态：`help`, `clear`, `echo`, `hello`, `uptime`, `date`, `rand`, `meminfo`, `diskinfo` (通过 syscall 27 get_system_info 查询系统信息)
 - [x] 程序执行：`fork` (syscall 25) + `exec` (syscall 26)
 - [x] 管道支持：`cmd1 | cmd2`（基于 Pipe IPC + I/O 重定向）

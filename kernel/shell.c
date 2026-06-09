@@ -27,6 +27,7 @@
 #include "../include/prng.h"
 #include "../include/ipc.h"
 #include "../include/httpclient.h"
+#include "../include/mbr.h"
 
 #define LINE_BUF_SIZE 256
 
@@ -254,7 +255,7 @@ static const char* builtin_commands[] = {
     "help","clear","uptime","meminfo","alloc","free","except",
     "kmtest","echo","testuser","runuser","hello","forktest",
     "schedtest","ipctest","ls","cat","mkdir","rmdir",
-    "write","rm","diskinfo","pci","net","ping","send","recv",
+    "write","rm","diskinfo","pci","partitions","net","ping","send","recv",
     "arp","netstat","rand","dhcp","tcp-recv","webserver","date",
     "snake","gfxsnake","gtest","gui","pageinfo","http-get", NULL
 };
@@ -1554,6 +1555,8 @@ static void shell_handle_command(const char* cmd) {
         } else {
             printf("File not found: %s\n", fname);
         }
+    } else if (strcmp(cmd, "partitions") == 0) {
+        mbr_list_partitions(mbr_get_info());
     } else {
         printf("Unknown command: %s\n", cmd);
         printf("Type 'help' for available commands.\n");
