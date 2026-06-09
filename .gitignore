@@ -25,5 +25,9 @@ disk.img
 local_config.mk
 local_config.py
 
+# Python cache
+__pycache__/
+*.pyc
+
 # Windows reserved device name
 nul
