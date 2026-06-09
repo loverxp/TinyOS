@@ -245,7 +245,8 @@ struct page_directory_entry {
 
 ### 3.3 高级文件系统
 
-- [ ] **VFS 虚拟文件系统层**
+- [x] **VFS 虚拟文件系统层**（`kernel/vfs.c`，多后端路由架构，16 个 fd，DevFS 后端 `/dev/null` + `/dev/zero`，syscall 28 open / 29 read / 30 write / 31 close / 62 dup2，`filetest` 命令验证）
+- [ ] **FAT16 VFS 后端** — 将 FAT16 操作接入 VFS 统一接口
 - [ ] **Ext2** - 类 Unix 文件系统
 
 ---
@@ -290,7 +291,7 @@ struct page_directory_entry {
 **目标**：命令行解释器
 
 - [x] 命令解析
-- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `hello`, `forktest`, `ls [path]`, `cat <path>`, `mkdir <path>`, `rmdir <path>`, `write <path>`, `rm <path>`, `diskinfo`, `pci`, `partitions`, `net`, `ping <ip|hostname>`, `send <ip|hostname>`, `recv`, `arp`, `netstat`, `rand`, `dhcp`, `tcp-recv`, `http-get`, `ipctest`
+- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `hello`, `forktest`, `filetest`, `ls [path]`, `cat <path>`, `mkdir <path>`, `rmdir <path>`, `write <path>`, `rm <path>`, `diskinfo`, `pci`, `partitions`, `net`, `ping <ip|hostname>`, `send <ip|hostname>`, `recv`, `arp`, `netstat`, `rand`, `dhcp`, `tcp-recv`, `http-get`, `ipctest`
   - 已迁移到 Ring 3 用户态：`help`, `clear`, `echo`, `hello`, `uptime`, `date`, `rand`, `meminfo`, `diskinfo` (通过 syscall 27 get_system_info 查询系统信息)
 - [x] 程序执行：`fork` (syscall 25) + `exec` (syscall 26)
 - [x] 管道支持：`cmd1 | cmd2`（基于 Pipe IPC + I/O 重定向）

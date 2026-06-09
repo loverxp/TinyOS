@@ -70,7 +70,7 @@ qemu-system-i386.exe -kernel build/tinyos.bin -m 32
 
 ## 项目结构
 - `boot/`: 启动代码
-- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, paging.c, mm.c, except.c, loader.c, scheduler.c, ipc.c, fat16.c, net.c, wm.c, webserver.c, httpclient.c, mbr.c, embedded_user.asm, embedded_hello.asm, embedded_echo.asm, embedded_clear.asm, embedded_help.asm, embedded_forktest.asm, embedded_uptime.asm, embedded_date.asm, embedded_rand.asm, embedded_meminfo.asm, embedded_diskinfo.asm, user.asm, switch.asm）
+- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, paging.c, mm.c, except.c, loader.c, scheduler.c, ipc.c, fat16.c, net.c, wm.c, webserver.c, httpclient.c, mbr.c, vfs.c, embedded_user.asm, embedded_hello.asm, embedded_echo.asm, embedded_clear.asm, embedded_help.asm, embedded_forktest.asm, embedded_uptime.asm, embedded_date.asm, embedded_rand.asm, embedded_meminfo.asm, embedded_diskinfo.asm, user.asm, switch.asm）
 - `user/`: 用户程序与 libc（apps/echo.c, apps/clear.c, apps/help.c, apps/snake.c, apps/uptime.c, apps/date.c, apps/rand.c, apps/meminfo.c, apps/diskinfo.c, libc/stdio.c, libc/string.c, libc/stdlib.c, libc/syscall.h, crt0.s, user.ld, build.bat）
 - `drivers/`: 设备驱动（VGA、键盘、定时器、中断、GDT、串口、I/O、ATA、PCI、NE2000、VBE、帧缓冲、鼠标、内建字模、RTC）
 - `lib/`: 库函数（字符串处理、printf/sprintf 格式化输出、PRNG、调试框架）
@@ -116,6 +116,7 @@ qemu-system-i386.exe -kernel build/tinyos.bin -m 32
 - `kernel/fat16.c`: FAT16 文件系统（读/写/删除，FAT 链分配/释放）
 - `drivers/ata.c`: ATA PIO 驱动（读/写扇区，CACHE FLUSH）
 - `kernel/mbr.c`: MBR 分区表解析（读取扇区 0，解析 4 个分区条目，识别 FAT16 分区，`partitions` Shell 命令）
+- `kernel/vfs.c`: VFS 虚拟文件系统层（多后端路由，fd 表 16 项，DevFS 后端 /dev/null + /dev/zero，open/read/write/close/stat/dup2，syscall 28-31/62）
 - `kernel/ipc.c`: 进程间通信（Pipe 管道、Message Queue 消息队列、Shared Memory 共享内存）
 - `include/ipc.h`: IPC API 定义（pipe_t、mqueue_t、shm_region_t、函数声明）
 

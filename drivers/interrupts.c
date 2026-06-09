@@ -10,6 +10,7 @@
 #include "../include/prng.h"
 #include "../include/fat16.h"
 #include "../include/debug.h"
+#include "../include/vfs.h"
 
 // External user-mode exit handlers (defined in user.asm)
 extern void forked_task_exit_handler(void);
@@ -928,6 +929,34 @@ void syscall_handler(uint32_t* regs) {
         } else {
             regs[8] = 0;  /* Unknown type */
         }
+        return;
+    }
+
+    /* ── VFS file descriptor syscalls ─────────────────────────────────── */
+    if (syscall_no == 28) {
+        /* open(path, flags) -> fd */
+        regs[8] = (uint32_t)vfs_open((const char*)arg1, (int)arg2);
+        return;
+    }
+    if (syscall_no == 29) {
+        /* read(fd, buf, size) -> bytes_read */
+        regs[8] = (uint32_t)vfs_read((int)arg1, (void*)arg2, arg3);
+        return;
+    }
+    if (syscall_no == 30) {
+        /* write(fd, buf, size) -> bytes_written */
+        regs[8] = (uint32_t)vfs_write((int)arg1, (const void*)arg2, arg3);
+        return;
+    }
+    if (syscall_no == 31) {
+        /* close(fd) */
+        vfs_close((int)arg1);
+        regs[8] = 0;
+        return;
+    }
+    if (syscall_no == 62) {
+        /* dup2(oldfd, newfd) -> newfd */
+        regs[8] = (uint32_t)vfs_dup2((int)arg1, (int)arg2);
         return;
     }
 

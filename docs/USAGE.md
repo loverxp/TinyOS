@@ -88,6 +88,19 @@ TinyOS> except
 TinyOS> kmtest
 ```
 
+**`filetest` — 测试 VFS 虚拟文件系统**
+```
+TinyOS> filetest
+=== VFS File Test ===
+/dev/null: write 5 -> 5
+/dev/null: PASS
+/dev/zero: read 4 -> 4, bytes=[0,0,0,0]
+/dev/zero: PASS
+dup2(0, 5) -> 5: PASS
+=== VFS Test Done ===
+```
+> 验证 VFS 层的 `/dev/null`（写入丢弃，读取 EOF）、`/dev/zero`（读取返回全零）和 `dup2` 文件描述符复制功能。
+
 **`pageinfo` — 显示分页信息**
 ```
 TinyOS> pageinfo

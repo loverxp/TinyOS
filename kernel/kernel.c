@@ -20,6 +20,7 @@
 #include "../include/vbe.h"
 #include "../include/ipc.h"
 #include "../include/mbr.h"
+#include "../include/vfs.h"
 
 // User mode entry points (from user.asm)
 extern void run_user_task(void (*entry)(void));
@@ -158,6 +159,13 @@ void kernel_main(uint32_t multiboot_info_addr) {
             printf("[OK] MBR: %d partition(s), FAT16 at index %d\n",
                    mbr->count, mbr->fat16_partition);
         }
+
+        /* Initialize VFS and register DevFS backend */
+        vfs_init();
+        extern const vfs_backend_ops_t devfs_ops;
+        vfs_register_backend(&devfs_ops);
+        printf("[OK] VFS initialized (DevFS: /dev/null, /dev/zero)\n");
+        serial_writestring("[OK] VFS\n");
 
         /* Initialize FAT16 filesystem */
         if (fat16_init() == 0) {

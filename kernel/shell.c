@@ -28,6 +28,7 @@
 #include "../include/ipc.h"
 #include "../include/httpclient.h"
 #include "../include/mbr.h"
+#include "../include/vfs.h"
 
 #define LINE_BUF_SIZE 256
 
@@ -254,7 +255,7 @@ static void history_navigate(int dir) {
 static const char* builtin_commands[] = {
     "help","clear","uptime","meminfo","alloc","free","except",
     "kmtest","echo","testuser","runuser","hello","forktest",
-    "schedtest","ipctest","ls","cat","mkdir","rmdir",
+    "schedtest","ipctest","filetest","ls","cat","mkdir","rmdir",
     "write","rm","diskinfo","pci","partitions","net","ping","send","recv",
     "arp","netstat","rand","dhcp","tcp-recv","webserver","date",
     "snake","gfxsnake","gtest","gui","pageinfo","http-get", NULL
@@ -1555,6 +1556,41 @@ static void shell_handle_command(const char* cmd) {
         } else {
             printf("File not found: %s\n", fname);
         }
+    } else if (strcmp(cmd, "filetest") == 0) {
+        printf("=== VFS File Test ===\n");
+        /* Test /dev/null */
+        int fd = vfs_open("/dev/null", 0x02);
+        if (fd >= 0) {
+            int n = vfs_write(fd, "hello", 5);
+            printf("/dev/null: write 5 -> %d\n", n);
+            vfs_close(fd);
+            printf("/dev/null: PASS\n");
+        } else {
+            printf("/dev/null: open FAILED\n");
+        }
+        /* Test /dev/zero */
+        fd = vfs_open("/dev/zero", 0x01);
+        if (fd >= 0) {
+            char buf[8] = {1,2,3,4,5,6,7,8};
+            int n = vfs_read(fd, buf, 4);
+            printf("/dev/zero: read 4 -> %d, bytes=[%d,%d,%d,%d]\n",
+                   n, buf[0], buf[1], buf[2], buf[3]);
+            vfs_close(fd);
+            printf("/dev/zero: %s\n",
+                   (n == 4 && buf[0]==0 && buf[1]==0 && buf[2]==0 && buf[3]==0)
+                   ? "PASS" : "FAIL");
+        } else {
+            printf("/dev/zero: open FAILED\n");
+        }
+        /* Test dup2 */
+        fd = vfs_open("/dev/null", 0x02);
+        if (fd >= 0) {
+            int fd2 = vfs_dup2(fd, 5);
+            printf("dup2(%d, 5) -> %d: %s\n", fd, fd2, fd2 == 5 ? "PASS" : "FAIL");
+            vfs_close(fd);
+            if (fd2 >= 0) vfs_close(fd2);
+        }
+        printf("=== VFS Test Done ===\n");
     } else if (strcmp(cmd, "partitions") == 0) {
         mbr_list_partitions(mbr_get_info());
     } else {
