@@ -30,5 +30,6 @@ _start:
 global __libc_exit
 __libc_exit:
     mov eax, 0      ; syscall 0: return to kernel
+    mov ebx, [esp+4]; exit code argument
     int 0x80
     ret
