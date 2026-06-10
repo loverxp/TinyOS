@@ -93,6 +93,7 @@ task_t* task_create(const char* name, task_entry_t entry) {
     task->stdout_pipe = -1;
     task->stdin_pipe = -1;
     task->is_forked = 0;
+    task->user_stack_base = 0;
     task->sig_pending = 0;
     memset(task->sig_handlers, 0, sizeof(task->sig_handlers));
     task_entries[task->pid] = entry;
@@ -154,6 +155,10 @@ uint32_t prepare_switch(void) {
             serial_printf("[sched] Freeing stack for '%s' (0x%x)\n",
                           tasks[i].name, tasks[i].stack_base);
             pmm_free_page((void*)tasks[i].stack_base);
+            if (tasks[i].user_stack_base) {
+                pmm_free_page((void*)tasks[i].user_stack_base);
+                tasks[i].user_stack_base = 0;
+            }
             tasks[i].stack_base = 0;
             tasks[i].pid = 0;
             tasks[i].name[0] = '\0';
@@ -454,6 +459,7 @@ int task_fork(uint32_t* regs) {
     sprintf(child->name, "fork_%u", child->pid);
     child->state = TASK_READY;
     child->stack_base = (uint32_t)child_kstack;
+    child->user_stack_base = (uint32_t)child_ustack;
     child->esp = child_esp;
     child->ticks_used = 1;        /* non-zero → skip trampoline path */
     child->sleep_deadline = 0;

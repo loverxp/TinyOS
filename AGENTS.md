@@ -131,7 +131,8 @@ qemu-system-i386.exe -kernel build/tinyos.bin -m 32
 - `kernel/wm.c` / `include/window.h`: 窗口管理器（窗口创建/移动/关闭、Z-order、标题栏、鼠标事件）
 - `lib/prng.c` / `include/prng.h`: 伪随机数生成器 (xorshift32)
 - `lib/debug.c` / `include/debug.h`: 调试输出框架 (`kprintf` 四级日志、内核栈回溯)
-- `kernel/net.c`: 网络协议栈（ARP / IPv4 / ICMP / UDP / TCP / DHCP），含 ARP 表访问 API、网络统计、Socket 抽象层
+- `kernel/net.c`: 网络协议栈（ARP / IPv4 / ICMP / UDP / TCP / DHCP），含 ARP 表访问 API、网络统计、Socket 抽象层、TCP 客户端连接 (net_tcp_connect)、DNS CNAME 链解析
+- `kernel/httpclient.c` / `include/httpclient.h`: HTTP 客户端（HTTP/1.0 GET 请求，DNS 域名解析，TCP 连接超时管理）
 - `kernel/fat16.c`: FAT16 文件系统（读/写/删除，FAT 链分配/释放）
 - `drivers/ata.c`: ATA PIO 驱动（读/写扇区，CACHE FLUSH）
 - `kernel/mbr.c`: MBR 分区表解析（读取扇区 0，解析 4 个分区条目，识别 FAT16 分区，`partitions` Shell 命令）
@@ -171,6 +172,7 @@ qemu-system-i386.exe -kernel build/tinyos.bin -m 32
 - **多任务调度器**: 抢占式 Round-Robin，IRQ0 每次 tick 设置 `need_reschedule=1`，`irq_common_stub` 在 EOI 后调用 `prepare_switch()` + `do_switch()` 完成上下文切换。idle 任务（主循环）作为循环链表节点参与轮换
 - **schedtest 命令**: `schedtest [N]` 创建两个测试线程交替打印 A/B，N 秒后自动退出（默认 10 秒，上限 300 秒）。任务通过 `task_exit()` 标记 FINISHED
 - **IPC 阻塞与唤醒**: `ipc_block()` 将当前任务设为 BLOCKED 并记录 `ipc_wait_obj`/`ipc_wait_type`，然后 halt 等待。数据到达后 `ipc_wake()` 调用 `scheduler_wake_ipc()` 遍历任务数组精确唤醒匹配等待者和等待类型的任务。IPC 阻塞的任务 `sleep_deadline=0`，不会被定时器唤醒逻辑误触
+- **Shell 增强**: 命令历史（循环缓冲区 16 条，Up/Down 箭头浏览，重复命令抑制）、Tab 自动补全（37 个内建命令注册表，单匹配自动补全+多匹配列表）、行编辑（Home/End 光标移动）
 - **信号系统**: POSIX-like 信号（SIGHUP=1, SIGINT=2, SIGKILL=9, SIGTERM=15），`task_t` 扩展 `sig_pending` 位掩码 + `sig_handlers[16]` 数组。Ctrl+C 广播 SIGINT 到所有非 idle 任务，`prepare_switch()` 遍历全任务数组投递信号，默认动作 TERMINATE 终止任务并从环形链表摘除。Syscall 33 = `kill(pid, sig)`
 - **gfxsnake**: 新版 VGA Mode 13h 像素模式贪吃蛇，作为用户程序在 Ring 3 运行，使用系统调用切换视频模式和读取输入
 - **用户命令迁移到 Ring 3**: echo/clear/help/hello/forktest/uptime/date/rand/meminfo/diskinfo/ls/cat/more/write/rm/mkdir/rmdir/ping/arp/net/netstat/dhcp/pci/kill/filetest/dino/si/tinyhttpd 共 28 个已作为独立 ELF 用户程序运行（嵌入内核二进制）。通过 `run_embedded_elf()` 通用加载器执行，参数通过 `user_cmd_args` 缓冲区 + syscall 23 (`get_cmdline`) 传递。系统信息命令通过 syscall 27 (`get_system_info`) 查询内核数据。文件系统类和网络类用户程序需 FAT16 VFS 后端才能完整工作，当前仍由内核 Shell 处理实际 FAT16 操作

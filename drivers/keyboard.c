@@ -10,6 +10,7 @@
 
 static keyboard_char_callback_t char_callback = NULL;
 static keyboard_raw_callback_t raw_callback = NULL;
+static keyboard_ctrlc_callback_t ctrlc_callback = NULL;
 
 // Track 0xE0 extended prefix for arrow keys etc.
 static volatile int extended_prefix = 0;
@@ -131,6 +132,10 @@ void keyboard_register_raw_callback(keyboard_raw_callback_t callback) {
     serial_string("\n");
 }
 
+void keyboard_register_ctrlc_callback(keyboard_ctrlc_callback_t callback) {
+    ctrlc_callback = callback;
+}
+
 void keyboard_handler(void) {
     // Read scancode from keyboard
     uint8_t scancode = inb(KEYBOARD_DATA_PORT);
@@ -180,6 +185,7 @@ void keyboard_handler(void) {
             for (uint32_t p = 1; p < 256; p++) {
                 signal_send(p, SIGINT);
             }
+            if (ctrlc_callback) ctrlc_callback();
             need_reschedule = 1;
         } else if (scancode < sizeof(scancode_to_ascii)) {
             char c;

@@ -28,6 +28,7 @@ typedef struct task {
     int      stdout_pipe;     /* -1 = normal VGA output, else pipe_id for output */
     int      stdin_pipe;      /* -1 = normal keyboard input, else pipe_id for input */
     uint8_t  is_forked;       /* 1 = created by fork(), should call task_exit() on exit */
+    uint32_t user_stack_base; /* base address of user stack page (for fork cleanup) */
     uint32_t sig_pending;     /* bitmask of pending signals */
     signal_handler_t sig_handlers[16]; /* per-signal handlers */
     struct task* next;

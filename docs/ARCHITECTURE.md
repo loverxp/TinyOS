@@ -894,6 +894,53 @@ TinyOS> write note.txt Hello  创建文件（支持路径）
 TinyOS> rm note.txt           删除文件（支持路径）
 ```
 
+### VFS 虚拟文件系统 (vfs.c)
+
+VFS 层提供文件描述符抽象，支持多后端路由：
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  用户程序     │ --> │  VFS 层       │ --> │  DevFS 后端   │
+│  (syscall    │     │  (vfs.c)     │     │  /dev/null   │
+│   28-31/62)  │     │  fd 表 16 项  │     │  /dev/zero   │
+└──────────────┘     └──────────────┘     └──────────────┘
+                            │
+                            ▼
+                     ┌──────────────┐
+                     │  FAT16 后端    │
+                     │  (待接入)      │
+                     └──────────────┘
+```
+
+**系统调用**:
+| Syscall | 函数 | 说明 |
+|---------|------|------|
+| 28 | `open(path, flags)` | 打开文件，返回 fd |
+| 29 | `read(fd, buf, size)` | 从 fd 读取 |
+| 30 | `write(fd, buf, size)` | 向 fd 写入 |
+| 31 | `close(fd)` | 关闭 fd |
+| 62 | `dup2(old, new)` | 复制 fd |
+
+**DevFS 后端**: `/dev/null` — 写入丢弃，读取返回 EOF；`/dev/zero` — 读取返回全零。
+
+**验证**: `filetest` 命令自动测试 VFS 各功能。
+
+### 信号系统 (signal.c)
+
+POSIX-like 信号，支持 SIGHUP(1)/SIGINT(2)/SIGKILL(9)/SIGTERM(15)：
+
+**数据结构**: `task_t` 扩展 `sig_pending` 位掩码 + `sig_handlers[16]` 数组
+
+**流程**:
+1. `signal_send(pid, sig)` 设置目标任务的 `sig_pending` 位
+2. `prepare_switch()` 遍历所有任务的 `sig_pending`
+3. `signal_check_and_deliver(task)` 查找待处理信号
+4. 默认 SIG_ACTION_TERMINATE → `task_exit()` 并摘除
+5. SIG_ACTION_IGN — 忽略信号
+
+**Ctrl+C**: 键盘驱动检测到 Ctrl+C (0x03)，遍历所有非 idle 任务广播 SIGINT。
+**Syscall 33**: `kill(pid, sig)` — 用户程序发送信号。
+
 ---
 
 ## 网络模块
@@ -984,7 +1031,30 @@ TinyOS> net                   显示网络配置 (IP/GW/Mask/MAC)
 TinyOS> ping 10.0.2.2         发送 ICMP echo (首次触发 ARP)
 TinyOS> ping example.com      支持域名（DNS 自动解析）
 TinyOS> send 10.0.2.2 8888 Hello   发送 UDP 数据包
+TinyOS> http-get httpbin.org 80 /get    HTTP GET 请求（支持域名解析和 IP 直连）
 ```
+
+### HTTP 客户端 (httpclient.c)
+
+`http-get` 命令通过 HTTP 客户端模块发送 HTTP/1.0 GET 请求：
+
+```
+http-get <host> [port] [path]
+```
+
+**流程**:
+1. 解析主机名（自动判断域名 vs IP）
+2. DNS 解析域名 → IP（支持 CNAME 链）
+3. 调用 `net_tcp_connect(ip, port)` 建立 TCP 连接（带 3 秒超时）
+4. 构建 HTTP GET 请求（含 `Host:` 和 `Connection: close` 头）
+5. 通过回调累积 TCP 响应数据到 4096 字节缓冲区
+6. 打印响应内容后关闭连接
+
+**关键函数**:
+- `http_get(host, port, path)` — 入口函数，发起完整 HTTP 请求流程
+- `net_tcp_connect(ip, port)` — TCP 客户端连接（三次握手，SYN 重试，临时端口分配）
+- `net_tcp_is_connected()` — 检查 TCP 连接状态
+- DNS 解析内置在 `net_dns_query()` 中，支持标准 DNS header + QNAME 编码
 
 ---
 

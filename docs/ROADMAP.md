@@ -257,6 +257,13 @@ struct page_directory_entry {
 - [ ] **FAT16 VFS 后端** — 将 FAT16 操作接入 VFS 统一接口
 - [ ] **Ext2** - 类 Unix 文件系统
 
+### 3.4 验证状态 (v4.0 恢复验证)
+- [x] **MBR 分区解析** (Step 2) — `partitions` 命令列出分区信息，已验证
+- [x] **VFS + DevFS** (Step 3) — 多后端路由，`/dev/null` + `/dev/zero`，`filetest` 命令验证通过
+- [x] **信号系统 + Ctrl+C** (Step 4) — 信号发送/投递/终止，Ctrl+C 广播 SIGINT，验证通过
+- [x] **29 个 Ring 3 用户程序** (Step 8-11) — 文件系统类(7) + 网络类(5) + 系统/工具类(3) + 游戏/服务器(3) 全部嵌入内核并验证
+- [x] **libc 扩展集成** (Step 7) — errno.c/termios.c 纳入构建并编译通过
+
 ---
 
 ## 第四阶段：用户空间 (v0.8 - v0.9)
@@ -306,6 +313,8 @@ struct page_directory_entry {
   - Shell 解析 `|` 分隔的多条命令
   - 为每条命令创建子进程，通过 pipe 连接 stdin/stdout
   - `forktest` 用户程序验证 fork/exec/yield/exit 流程
+
+- [x] **Shell 增强** — 命令历史 (循环缓冲区 16 条, Up/Down 导航), Tab 自动补全 (37 个内建命令注册表, 单匹配/多匹配/公共前缀), 行编辑 (Home/End 光标移动)
 
 ### 4.3 用户态标准库 (libc)
 **目标**：提供基础 C 运行时，用户程序无需关心内核细节
@@ -383,6 +392,8 @@ struct page_directory_entry {
   - Shell 命令：`webserver` / `webserver stop`
   - 通过 QEMU `hostfwd=tcp::8088-:80` 从宿主机访问
 
+- [x] **HTTP 客户端** — 基于 TCP 的 HTTP/1.0 GET 请求，支持 DNS 域名解析，4096 字节响应缓冲区
+
 ### 5.1a 网络功能增强（近期待办）
 
 - [ ] **UDP 接收命令** — 添加 `recv <port>` 命令，TinyOS 可监听 UDP 端口接收主机数据 ✅ 已实现
@@ -391,6 +402,7 @@ struct page_directory_entry {
 - [ ] **Shell 命令输出优化** — 移除 ping/send 的 `[1/4]` 调试输出，仅在出错时显示诊断信息 ✅ 已实现
 - [x] **DHCP 客户端** — 自动获取 IP/网关/掩码，替代硬编码 10.0.2.15 ✅ 已实现（`dhcp` 命令）
 - [x] **DNS 解析** — 支持域名到 IP 的解析（查询 10.0.2.3）✅ 已实现
+- [x] **DNS CNAME 链解析** — 遍历 DNS 应答记录，正确处理 CNAME→A 记录链 ✅ 已实现
 - [x] **Shell 命令迁移到用户态** — echo/clear/help 作为 Ring 3 ELF 程序运行 ✅ 已实现
 - [x] **get_system_info 通用系统调用** — syscall 27，支持 5 种信息查询类型：uptime (0)、date (1)、rand (2)、meminfo (3)、diskinfo (4) ✅ 已实现
 - [x] **命令迁移到 Ring 3** — uptime/date/rand/meminfo/diskinfo 已作为独立 ELF 用户程序运行，通过 syscall 27 查询系统信息 ✅ 已实现
@@ -399,6 +411,7 @@ struct page_directory_entry {
   - 序列号/确认号管理 + 校验和（复用 IP 校验和函数）
   - 四次挥手（FIN 处理）
   - 简易连接表（支持 4 个并发连接）
+- [x] **TCP 客户端连接 (net_tcp_connect)** — 发起 TCP 三次握手，带 SYN 重试和 ARP 轮询，临时端口分配器 ✅ 已实现
 - [x] **Socket 抽象层** ✅ 已实现
   - `sock_create()` / `sock_bind()` / `sock_connect()` / `sock_send()` / `sock_recv()` / `sock_listen()` / `sock_close()`
   - 环形接收缓冲区（1024 bytes），超时接收（`sock_recv` with timeout_ms）

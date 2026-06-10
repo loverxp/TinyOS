@@ -256,10 +256,11 @@ static void history_navigate(int dir) {
 static const char* builtin_commands[] = {
     "help","clear","uptime","meminfo","alloc","free","except",
     "kmtest","echo","testuser","runuser","hello","forktest",
-    "schedtest","ipctest","filetest","ls","cat","mkdir","rmdir",
+    "schedtest","ipctest","filetest","ls","cat","more","mkdir","rmdir",
     "write","rm","diskinfo","pci","partitions","net","ping","send","recv",
     "arp","netstat","rand","dhcp","tcp-recv","webserver","date",
-    "snake","gfxsnake","gtest","gui","pageinfo","http-get", NULL
+    "snake","gfxsnake","gtest","gui","pageinfo","http-get",
+    "dino","si","tinyhttpd","kill","ps", NULL
 };
 
 /* Forward declaration */
@@ -271,11 +272,9 @@ static void shell_tab_complete(void) {
     for (int i = line_pos - 1; i >= 0; i--) {
         if (line_buffer[i] == ' ') { word_start = i + 1; break; }
     }
-    for (int i = 0; i < word_start; i++) {
-        if (line_buffer[i] != ' ') return;
-    }
-    const char* prefix = line_buffer;
-    int prefix_len = line_pos;
+    const char* prefix = &line_buffer[word_start];
+    int prefix_len = line_pos - word_start;
+    if (prefix_len == 0) return;
     const char* match = NULL;
     int match_len = 0, match_count = 0;
     const char** cmd = builtin_commands;
@@ -287,9 +286,9 @@ static void shell_tab_complete(void) {
     }
     if (match_count == 0) return;
     if (match_count == 1) {
-        strncpy(line_buffer, match, LINE_BUF_SIZE - 1);
+        strncpy(&line_buffer[word_start], match, LINE_BUF_SIZE - 1 - word_start);
         line_buffer[LINE_BUF_SIZE - 1] = '\0';
-        line_pos = match_len;
+        line_pos = word_start + match_len;
         if (line_pos < LINE_BUF_SIZE - 2) line_buffer[line_pos++] = ' ';
         line_buffer[line_pos] = '\0';
         shell_redisplay();
@@ -310,9 +309,9 @@ static void shell_tab_complete(void) {
             cmd++;
         }
         if (common > prefix_len) {
-            strncpy(line_buffer, match, common);
-            line_buffer[common] = '\0';
-            line_pos = common;
+            strncpy(&line_buffer[word_start], match, common);
+            line_pos = word_start + common;
+            line_buffer[line_pos] = '\0';
             shell_redisplay();
         } else {
             printf("\n");
@@ -1610,15 +1609,44 @@ static void shell_handle_command(const char* cmd) {
         printf("=== VFS Test Done ===\n");
     } else if (strcmp(cmd, "partitions") == 0) {
         mbr_list_partitions(mbr_get_info());
+    } else if (strncmp(cmd, "more ", 5) == 0) {
+        run_more_user(cmd + 5);
+    } else if (strcmp(cmd, "dino") == 0) {
+        run_dino_user();
+    } else if (strcmp(cmd, "si") == 0) {
+        run_si_user();
+    } else if (strcmp(cmd, "tinyhttpd") == 0) {
+        run_tinyhttpd_user();
+    } else if (strncmp(cmd, "kill ", 5) == 0) {
+        run_kill_user(cmd + 5);
+    } else if (strcmp(cmd, "ps") == 0) {
+        static const char* state_names[] = {"READY", "RUNNING", "BLOCKED", "FINISHED"};
+        printf("  PID  STATE     NAME\n");
+        printf("  ---  --------  ----------------\n");
+        for (uint32_t p = 0; p < 256; p++) {
+            task_t* t = scheduler_find_pid(p);
+            if (t && t->state != TASK_FINISHED) {
+                printf("  %3u  %-8s  %s\n", t->pid,
+                       t->state < 4 ? state_names[t->state] : "?",
+                       t->name);
+            }
+        }
     } else {
         printf("Unknown command: %s\n", cmd);
         printf("Type 'help' for available commands.\n");
     }
 }
 
+static void shell_ctrlc_handler(void) {
+    line_pos = 0;
+    line_buffer[0] = '\0';
+    shell_prompt();
+}
+
 void shell_init(void) {
     keyboard_register_char_callback(shell_char_callback);
     keyboard_register_raw_callback(shell_raw_callback);
+    keyboard_register_ctrlc_callback(shell_ctrlc_handler);
     serial_register_callback(shell_char_callback);
     shell_prompt();
 }

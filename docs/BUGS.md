@@ -149,6 +149,42 @@
 
 ---
 
+## BUG-28: 用户程序运行偶发分配用户栈失败
+- **现象**: 应用第一次能运行，第二次提示分配用户栈失败，第三次又能运行（如 `hello` 命令）。呈周期性规律。
+- **推测**: 用户栈分配或回收逻辑存在竞态/状态残留，偶发分配失败。可能与 `run_embedded_elf()` 中用户栈的释放时机或 TSS.esp0 切换相关。
+- **文件**: `kernel/loader.c`（`run_embedded_elf` 用户栈分配）
+
+### BUG-29: Shell Tab 补全与输入编辑行为异常
+- **现象**: 输入 `h` 再按 Tab，然后输入 `e` 再按 Tab，命令行变为 `hhe`；回删到第一个 `h` 时无法再删除。
+- **文件**: `kernel/shell.c`（Tab 补全逻辑、行编辑处理）
+
+### BUG-30: 管道命令 `help | more` 提示未知命令或触发页错误
+- **现象**: 输入 `help | more` 被识别为未知命令，或触发 Page Fault。
+- **文件**: `kernel/shell.c`（管道解析）、`kernel/ipc.c`（Pipe 实现）
+
+### BUG-31: 图形游戏（dino/si）画面画出后立即返回字符模式
+- **现象**: `dino` 和 `si` 命令执行后，游戏画面已在屏幕上画出，但输入模式已回到 Shell 命令行，游戏无法继续运行。
+- **推测**: 游戏程序切换到 VGA Mode 13h 后执行，但返回时未阻塞等待游戏结束，或恢复文本模式的时机过早。
+- **文件**: `user/apps/dino.c`、`user/apps/si.c`、`loader.c`（`run_embedded_elf` 退出流程）
+
+### BUG-32: `tinyhttpd` 命令执行异常
+- **现象**: 输入 `tinyhttpd` 后打印大量 syscall 输出，然后返回内核态（Shell），Web 服务器未正常运行。
+- **文件**: `user/apps/tinyhttpd.c`、`kernel/webserver.c`
+
+### BUG-33: `sh` 命令不存在
+- **现象**: Shell 中执行 `sh` 返回命令不存在。
+- **文件**: `kernel/shell.c`（命令表）
+
+### BUG-34: WebServer 后台进程不显示在 `ps` 中
+- **现象**: WebServer 自动启动为后台进程，但 `ps` 命令仅显示 `idle` 任务，无法测试 `kill` 命令。
+- **文件**: `kernel/shell.c`（`ps` 命令实现）、`kernel/scheduler.c`（任务列表遍历）
+
+### BUG-35: `&` 后台运行操作符无效
+- **现象**: Shell 的 `&` 后台执行操作符不起作用，命令仍在前台执行。
+- **文件**: `kernel/shell.c`（命令解析/`&` 处理逻辑）
+
+---
+
 ## 修复优先级建议
 
 1. **BUG-01** (FAT16 delete 目录损坏) — 数据损坏，必须立即修
