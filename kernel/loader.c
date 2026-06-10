@@ -47,6 +47,20 @@ extern uint8_t embedded_meminfo_start[];
 extern uint8_t embedded_meminfo_end[];
 extern uint8_t embedded_diskinfo_start[];
 extern uint8_t embedded_diskinfo_end[];
+extern uint8_t embedded_ls_start[];
+extern uint8_t embedded_ls_end[];
+extern uint8_t embedded_cat_start[];
+extern uint8_t embedded_cat_end[];
+extern uint8_t embedded_more_start[];
+extern uint8_t embedded_more_end[];
+extern uint8_t embedded_write_start[];
+extern uint8_t embedded_write_end[];
+extern uint8_t embedded_rm_start[];
+extern uint8_t embedded_rm_end[];
+extern uint8_t embedded_mkdir_start[];
+extern uint8_t embedded_mkdir_end[];
+extern uint8_t embedded_rmdir_start[];
+extern uint8_t embedded_rmdir_end[];
 
 // External assembly functions
 extern void vga_initialize(void);
@@ -335,4 +349,39 @@ void run_meminfo_user(void) {
 
 void run_diskinfo_user(void) {
     run_embedded_elf("diskinfo.elf", embedded_diskinfo_start, embedded_diskinfo_end);
+}
+
+void run_ls_user(const char* args) {
+    strcpy(user_cmd_args, args ? args : "");
+    run_embedded_elf("ls.elf", embedded_ls_start, embedded_ls_end);
+}
+
+void run_cat_user(const char* args) {
+    strcpy(user_cmd_args, args ? args : "");
+    run_embedded_elf("cat.elf", embedded_cat_start, embedded_cat_end);
+}
+
+void run_more_user(const char* args) {
+    strcpy(user_cmd_args, args ? args : "");
+    run_embedded_elf("more.elf", embedded_more_start, embedded_more_end);
+}
+
+void run_write_user(const char* args) {
+    strcpy(user_cmd_args, args ? args : "");
+    run_embedded_elf("write.elf", embedded_write_start, embedded_write_end);
+}
+
+void run_rm_user(const char* args) {
+    strcpy(user_cmd_args, args ? args : "");
+    run_embedded_elf("rm.elf", embedded_rm_start, embedded_rm_end);
+}
+
+void run_mkdir_user(const char* args) {
+    strcpy(user_cmd_args, args ? args : "");
+    run_embedded_elf("mkdir.elf", embedded_mkdir_start, embedded_mkdir_end);
+}
+
+void run_rmdir_user(const char* args) {
+    strcpy(user_cmd_args, args ? args : "");
+    run_embedded_elf("rmdir.elf", embedded_rmdir_start, embedded_rmdir_end);
 }

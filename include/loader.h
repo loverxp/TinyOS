@@ -36,4 +36,13 @@ void run_meminfo_user(void);
 // Load and run the diskinfo user program
 void run_diskinfo_user(void);
 
+// File management commands (Ring 3 user programs)
+void run_ls_user(const char* args);
+void run_cat_user(const char* args);
+void run_more_user(const char* args);
+void run_write_user(const char* args);
+void run_rm_user(const char* args);
+void run_mkdir_user(const char* args);
+void run_rmdir_user(const char* args);
+
 #endif // LOADER_H

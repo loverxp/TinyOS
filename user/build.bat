@@ -12,7 +12,7 @@ if not exist %OBJCOPY% set OBJCOPY=..\tools\i686-elf-objcopy.exe
 set OUT=..\build\user
 if not exist %OUT% mkdir %OUT%
 
-set CFLAGS=-m32 -mgeneral-regs-only -ffreestanding -O2 -Wall -Wextra -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -I libc -I include
+set CFLAGS=-m32 -mgeneral-regs-only -ffreestanding -O2 -Wall -Wextra -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -I include -I libc
 set LDFLAGS=-T user.ld -nostdlib
 
 echo Building user: crt0.o
@@ -169,4 +169,88 @@ echo Converting: diskinfo.bin
 %OBJCOPY% -O binary %OUT%\diskinfo.elf %OUT%\diskinfo.bin
 if errorlevel 1 exit /b 1
 
-echo Done: hello.bin, gfxsnake.bin, echo.bin, clear.bin, help.bin, forktest.bin, uptime.bin, date.bin, rand.bin, meminfo.bin, diskinfo.bin
+echo Building user: ls
+%GCC% %CFLAGS% -c apps\ls.c -o %OUT%\ls.o
+if errorlevel 1 exit /b 1
+
+echo Linking: ls.elf
+%LD% %LDFLAGS% -o %OUT%\ls.elf %OUT%\ls.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: ls.bin
+%OBJCOPY% -O binary %OUT%\ls.elf %OUT%\ls.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: cat
+%GCC% %CFLAGS% -c apps\cat.c -o %OUT%\cat.o
+if errorlevel 1 exit /b 1
+
+echo Linking: cat.elf
+%LD% %LDFLAGS% -o %OUT%\cat.elf %OUT%\cat.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: cat.bin
+%OBJCOPY% -O binary %OUT%\cat.elf %OUT%\cat.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: more
+%GCC% %CFLAGS% -c apps\more.c -o %OUT%\more.o
+if errorlevel 1 exit /b 1
+
+echo Linking: more.elf
+%LD% %LDFLAGS% -o %OUT%\more.elf %OUT%\more.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: more.bin
+%OBJCOPY% -O binary %OUT%\more.elf %OUT%\more.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: write
+%GCC% %CFLAGS% -c apps\write.c -o %OUT%\write.o
+if errorlevel 1 exit /b 1
+
+echo Linking: write.elf
+%LD% %LDFLAGS% -o %OUT%\write.elf %OUT%\write.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: write.bin
+%OBJCOPY% -O binary %OUT%\write.elf %OUT%\write.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: rm
+%GCC% %CFLAGS% -c apps\rm.c -o %OUT%\rm.o
+if errorlevel 1 exit /b 1
+
+echo Linking: rm.elf
+%LD% %LDFLAGS% -o %OUT%\rm.elf %OUT%\rm.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: rm.bin
+%OBJCOPY% -O binary %OUT%\rm.elf %OUT%\rm.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: mkdir
+%GCC% %CFLAGS% -c apps\mkdir.c -o %OUT%\mkdir.o
+if errorlevel 1 exit /b 1
+
+echo Linking: mkdir.elf
+%LD% %LDFLAGS% -o %OUT%\mkdir.elf %OUT%\mkdir.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: mkdir.bin
+%OBJCOPY% -O binary %OUT%\mkdir.elf %OUT%\mkdir.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: rmdir
+%GCC% %CFLAGS% -c apps\rmdir.c -o %OUT%\rmdir.o
+if errorlevel 1 exit /b 1
+
+echo Linking: rmdir.elf
+%LD% %LDFLAGS% -o %OUT%\rmdir.elf %OUT%\rmdir.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: rmdir.bin
+%OBJCOPY% -O binary %OUT%\rmdir.elf %OUT%\rmdir.bin
+if errorlevel 1 exit /b 1
+
+echo Done: hello.bin, gfxsnake.bin, echo.bin, clear.bin, help.bin, forktest.bin, uptime.bin, date.bin, rand.bin, meminfo.bin, diskinfo.bin, ls.bin, cat.bin, more.bin, write.bin, rm.bin, mkdir.bin, rmdir.bin

@@ -49,7 +49,12 @@ ASM_SRCS  = boot/boot.asm drivers/interrupts.asm drivers/gdt.asm \
             kernel/embedded_forktest.asm \
             kernel/embedded_uptime.asm kernel/embedded_date.asm \
             kernel/embedded_rand.asm kernel/embedded_meminfo.asm \
-            kernel/embedded_diskinfo.asm kernel/switch.asm
+            kernel/embedded_diskinfo.asm \
+            kernel/embedded_ls.asm kernel/embedded_cat.asm \
+            kernel/embedded_more.asm kernel/embedded_write.asm \
+            kernel/embedded_rm.asm kernel/embedded_mkdir.asm \
+            kernel/embedded_rmdir.asm \
+            kernel/switch.asm
 
 # Object files (all in build/; .asm -> _asm.o to avoid name collision with .c)
 C_OBJS    = $(patsubst %.c,$(BUILD)/%.o,$(notdir $(C_SRCS)))
