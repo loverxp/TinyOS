@@ -61,6 +61,16 @@ extern uint8_t embedded_mkdir_start[];
 extern uint8_t embedded_mkdir_end[];
 extern uint8_t embedded_rmdir_start[];
 extern uint8_t embedded_rmdir_end[];
+extern uint8_t embedded_ping_start[];
+extern uint8_t embedded_ping_end[];
+extern uint8_t embedded_arp_start[];
+extern uint8_t embedded_arp_end[];
+extern uint8_t embedded_net_cmd_start[];
+extern uint8_t embedded_net_cmd_end[];
+extern uint8_t embedded_netstat_start[];
+extern uint8_t embedded_netstat_end[];
+extern uint8_t embedded_dhcp_start[];
+extern uint8_t embedded_dhcp_end[];
 
 // External assembly functions
 extern void vga_initialize(void);
@@ -384,4 +394,25 @@ void run_mkdir_user(const char* args) {
 void run_rmdir_user(const char* args) {
     strcpy(user_cmd_args, args ? args : "");
     run_embedded_elf("rmdir.elf", embedded_rmdir_start, embedded_rmdir_end);
+}
+
+void run_ping_user(const char* args) {
+    strcpy(user_cmd_args, args ? args : "");
+    run_embedded_elf("ping.elf", embedded_ping_start, embedded_ping_end);
+}
+
+void run_arp_user(void) {
+    run_embedded_elf("arp.elf", embedded_arp_start, embedded_arp_end);
+}
+
+void run_net_user(void) {
+    run_embedded_elf("net.elf", embedded_net_cmd_start, embedded_net_cmd_end);
+}
+
+void run_netstat_user(void) {
+    run_embedded_elf("netstat.elf", embedded_netstat_start, embedded_netstat_end);
+}
+
+void run_dhcp_user(void) {
+    run_embedded_elf("dhcp.elf", embedded_dhcp_start, embedded_dhcp_end);
 }

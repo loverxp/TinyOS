@@ -45,4 +45,11 @@ void run_rm_user(const char* args);
 void run_mkdir_user(const char* args);
 void run_rmdir_user(const char* args);
 
+// Network commands (Ring 3 user programs)
+void run_ping_user(const char* args);
+void run_arp_user(void);
+void run_net_user(void);
+void run_netstat_user(void);
+void run_dhcp_user(void);
+
 #endif // LOADER_H

@@ -253,4 +253,64 @@ echo Converting: rmdir.bin
 %OBJCOPY% -O binary %OUT%\rmdir.elf %OUT%\rmdir.bin
 if errorlevel 1 exit /b 1
 
-echo Done: hello.bin, gfxsnake.bin, echo.bin, clear.bin, help.bin, forktest.bin, uptime.bin, date.bin, rand.bin, meminfo.bin, diskinfo.bin, ls.bin, cat.bin, more.bin, write.bin, rm.bin, mkdir.bin, rmdir.bin
+echo Building user: ping
+%GCC% %CFLAGS% -c apps\ping.c -o %OUT%\ping.o
+if errorlevel 1 exit /b 1
+
+echo Linking: ping.elf
+%LD% %LDFLAGS% -o %OUT%\ping.elf %OUT%\ping.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: ping.bin
+%OBJCOPY% -O binary %OUT%\ping.elf %OUT%\ping.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: arp
+%GCC% %CFLAGS% -c apps\arp.c -o %OUT%\arp.o
+if errorlevel 1 exit /b 1
+
+echo Linking: arp.elf
+%LD% %LDFLAGS% -o %OUT%\arp.elf %OUT%\arp.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: arp.bin
+%OBJCOPY% -O binary %OUT%\arp.elf %OUT%\arp.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: net
+%GCC% %CFLAGS% -c apps\net.c -o %OUT%\net.o
+if errorlevel 1 exit /b 1
+
+echo Linking: net.elf
+%LD% %LDFLAGS% -o %OUT%\net.elf %OUT%\net.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: net.bin
+%OBJCOPY% -O binary %OUT%\net.elf %OUT%\net.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: netstat
+%GCC% %CFLAGS% -c apps\netstat.c -o %OUT%\netstat.o
+if errorlevel 1 exit /b 1
+
+echo Linking: netstat.elf
+%LD% %LDFLAGS% -o %OUT%\netstat.elf %OUT%\netstat.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: netstat.bin
+%OBJCOPY% -O binary %OUT%\netstat.elf %OUT%\netstat.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: dhcp
+%GCC% %CFLAGS% -c apps\dhcp.c -o %OUT%\dhcp.o
+if errorlevel 1 exit /b 1
+
+echo Linking: dhcp.elf
+%LD% %LDFLAGS% -o %OUT%\dhcp.elf %OUT%\dhcp.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: dhcp.bin
+%OBJCOPY% -O binary %OUT%\dhcp.elf %OUT%\dhcp.bin
+if errorlevel 1 exit /b 1
+
+echo Done: hello.bin, gfxsnake.bin, echo.bin, clear.bin, help.bin, forktest.bin, uptime.bin, date.bin, rand.bin, meminfo.bin, diskinfo.bin, ls.bin, cat.bin, more.bin, write.bin, rm.bin, mkdir.bin, rmdir.bin, ping.bin, arp.bin, net.bin, netstat.bin, dhcp.bin
