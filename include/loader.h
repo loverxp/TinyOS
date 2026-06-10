@@ -52,4 +52,14 @@ void run_net_user(void);
 void run_netstat_user(void);
 void run_dhcp_user(void);
 
+// System/utility commands (Ring 3 user programs)
+void run_pci_user(void);
+void run_kill_user(const char* args);
+void run_filetest_user(void);
+
+// Games and server (Ring 3 user programs)
+void run_dino_user(void);
+void run_si_user(void);
+void run_tinyhttpd_user(void);
+
 #endif // LOADER_H

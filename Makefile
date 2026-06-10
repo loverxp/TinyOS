@@ -57,6 +57,9 @@ ASM_SRCS  = boot/boot.asm drivers/interrupts.asm drivers/gdt.asm \
             kernel/embedded_ping.asm kernel/embedded_arp.asm \
             kernel/embedded_net_cmd.asm kernel/embedded_netstat.asm \
             kernel/embedded_dhcp.asm \
+            kernel/embedded_pci.asm kernel/embedded_kill.asm \
+            kernel/embedded_filetest.asm kernel/embedded_dino.asm \
+            kernel/embedded_si.asm kernel/embedded_tinyhttpd.asm \
             kernel/switch.asm
 
 # Object files (all in build/; .asm -> _asm.o to avoid name collision with .c)

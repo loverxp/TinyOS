@@ -313,4 +313,76 @@ echo Converting: dhcp.bin
 %OBJCOPY% -O binary %OUT%\dhcp.elf %OUT%\dhcp.bin
 if errorlevel 1 exit /b 1
 
-echo Done: hello.bin, gfxsnake.bin, echo.bin, clear.bin, help.bin, forktest.bin, uptime.bin, date.bin, rand.bin, meminfo.bin, diskinfo.bin, ls.bin, cat.bin, more.bin, write.bin, rm.bin, mkdir.bin, rmdir.bin, ping.bin, arp.bin, net.bin, netstat.bin, dhcp.bin
+echo Building user: pci
+%GCC% %CFLAGS% -c apps\pci.c -o %OUT%\pci.o
+if errorlevel 1 exit /b 1
+
+echo Linking: pci.elf
+%LD% %LDFLAGS% -o %OUT%\pci.elf %OUT%\pci.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: pci.bin
+%OBJCOPY% -O binary %OUT%\pci.elf %OUT%\pci.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: kill
+%GCC% %CFLAGS% -c apps\kill.c -o %OUT%\kill.o
+if errorlevel 1 exit /b 1
+
+echo Linking: kill.elf
+%LD% %LDFLAGS% -o %OUT%\kill.elf %OUT%\kill.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: kill.bin
+%OBJCOPY% -O binary %OUT%\kill.elf %OUT%\kill.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: filetest
+%GCC% %CFLAGS% -c apps\filetest.c -o %OUT%\filetest.o
+if errorlevel 1 exit /b 1
+
+echo Linking: filetest.elf
+%LD% %LDFLAGS% -o %OUT%\filetest.elf %OUT%\filetest.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: filetest.bin
+%OBJCOPY% -O binary %OUT%\filetest.elf %OUT%\filetest.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: dino
+%GCC% %CFLAGS% -c apps\dino.c -o %OUT%\dino.o
+if errorlevel 1 exit /b 1
+
+echo Linking: dino.elf
+%LD% %LDFLAGS% -o %OUT%\dino.elf %OUT%\dino.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: dino.bin
+%OBJCOPY% -O binary %OUT%\dino.elf %OUT%\dino.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: si
+%GCC% %CFLAGS% -c apps\si.c -o %OUT%\si.o
+if errorlevel 1 exit /b 1
+
+echo Linking: si.elf
+%LD% %LDFLAGS% -o %OUT%\si.elf %OUT%\si.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: si.bin
+%OBJCOPY% -O binary %OUT%\si.elf %OUT%\si.bin
+if errorlevel 1 exit /b 1
+
+echo Building user: tinyhttpd
+%GCC% %CFLAGS% -c apps\tinyhttpd.c -o %OUT%\tinyhttpd.o
+if errorlevel 1 exit /b 1
+
+echo Linking: tinyhttpd.elf
+%LD% %LDFLAGS% -o %OUT%\tinyhttpd.elf %OUT%\tinyhttpd.o %OUT%\crt0.o %LIBC%
+if errorlevel 1 exit /b 1
+
+echo Converting: tinyhttpd.bin
+%OBJCOPY% -O binary %OUT%\tinyhttpd.elf %OUT%\tinyhttpd.bin
+if errorlevel 1 exit /b 1
+
+echo Done: hello.bin, gfxsnake.bin, echo.bin, clear.bin, help.bin, forktest.bin, uptime.bin, date.bin, rand.bin, meminfo.bin, diskinfo.bin, ls.bin, cat.bin, more.bin, write.bin, rm.bin, mkdir.bin, rmdir.bin, ping.bin, arp.bin, net.bin, netstat.bin, dhcp.bin, pci.bin, kill.bin, filetest.bin, dino.bin, si.bin, tinyhttpd.bin

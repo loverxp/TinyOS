@@ -71,6 +71,18 @@ extern uint8_t embedded_netstat_start[];
 extern uint8_t embedded_netstat_end[];
 extern uint8_t embedded_dhcp_start[];
 extern uint8_t embedded_dhcp_end[];
+extern uint8_t embedded_pci_start[];
+extern uint8_t embedded_pci_end[];
+extern uint8_t embedded_kill_start[];
+extern uint8_t embedded_kill_end[];
+extern uint8_t embedded_filetest_start[];
+extern uint8_t embedded_filetest_end[];
+extern uint8_t embedded_dino_start[];
+extern uint8_t embedded_dino_end[];
+extern uint8_t embedded_si_start[];
+extern uint8_t embedded_si_end[];
+extern uint8_t embedded_tinyhttpd_start[];
+extern uint8_t embedded_tinyhttpd_end[];
 
 // External assembly functions
 extern void vga_initialize(void);
@@ -415,4 +427,29 @@ void run_netstat_user(void) {
 
 void run_dhcp_user(void) {
     run_embedded_elf("dhcp.elf", embedded_dhcp_start, embedded_dhcp_end);
+}
+
+void run_pci_user(void) {
+    run_embedded_elf("pci.elf", embedded_pci_start, embedded_pci_end);
+}
+
+void run_kill_user(const char* args) {
+    strcpy(user_cmd_args, args ? args : "");
+    run_embedded_elf("kill.elf", embedded_kill_start, embedded_kill_end);
+}
+
+void run_filetest_user(void) {
+    run_embedded_elf("filetest.elf", embedded_filetest_start, embedded_filetest_end);
+}
+
+void run_dino_user(void) {
+    run_embedded_elf("dino.elf", embedded_dino_start, embedded_dino_end);
+}
+
+void run_si_user(void) {
+    run_embedded_elf("si.elf", embedded_si_start, embedded_si_end);
+}
+
+void run_tinyhttpd_user(void) {
+    run_embedded_elf("tinyhttpd.elf", embedded_tinyhttpd_start, embedded_tinyhttpd_end);
 }
