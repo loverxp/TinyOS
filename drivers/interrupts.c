@@ -4,6 +4,7 @@
 #include "../include/string.h"
 #include "../include/except.h"
 #include "../include/scheduler.h"
+#include "../include/signal.h"
 #include "../include/ipc.h"
 #include "../include/rtc.h"
 #include "../include/pmm.h"
@@ -957,6 +958,12 @@ void syscall_handler(uint32_t* regs) {
     if (syscall_no == 62) {
         /* dup2(oldfd, newfd) -> newfd */
         regs[8] = (uint32_t)vfs_dup2((int)arg1, (int)arg2);
+        return;
+    }
+
+    if (syscall_no == 33) {
+        /* kill(pid, sig) -> 0 on success, -1 on failure */
+        regs[8] = (uint32_t)signal_send((uint32_t)arg1, (int)arg2);
         return;
     }
 

@@ -11,6 +11,7 @@
 #include "../include/paging.h"
 #include "../include/stdio.h"
 #include "../include/scheduler.h"
+#include "../include/signal.h"
 #include "../include/ata.h"
 #include "../include/fat16.h"
 #include "../include/pci.h"
@@ -144,6 +145,8 @@ void kernel_main(uint32_t multiboot_info_addr) {
 
     scheduler_init();
     serial_writestring("[OK] Scheduler\n");
+
+    signal_init();
 
     ipc_init();
     serial_writestring("[OK] IPC\n");

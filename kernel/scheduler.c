@@ -1,4 +1,5 @@
 #include "../include/scheduler.h"
+#include "../include/signal.h"
 #include "../include/pmm.h"
 #include "../include/string.h"
 #include "../include/stdio.h"
@@ -54,6 +55,8 @@ void scheduler_init(void) {
     idle->stdout_pipe = -1;
     idle->stdin_pipe = -1;
     idle->is_forked = 0;
+    idle->sig_pending = 0;
+    memset(idle->sig_handlers, 0, sizeof(idle->sig_handlers));
     idle->next = idle;
 
     current_task = idle;
@@ -90,6 +93,8 @@ task_t* task_create(const char* name, task_entry_t entry) {
     task->stdout_pipe = -1;
     task->stdin_pipe = -1;
     task->is_forked = 0;
+    task->sig_pending = 0;
+    memset(task->sig_handlers, 0, sizeof(task->sig_handlers));
     task_entries[task->pid] = entry;
 
     uint32_t* frame = (uint32_t*)(stack + TASK_STACK_SIZE);
@@ -187,6 +192,13 @@ uint32_t prepare_switch(void) {
                 tasks[i].ipc_wait_obj = NULL;
                 tasks[i].ipc_wait_type = 0;
             }
+        }
+    }
+
+    /* Deliver pending signals to all tasks */
+    for (int i = 0; i < MAX_TASKS; i++) {
+        if (tasks[i].sig_pending && tasks[i].state != TASK_FINISHED) {
+            signal_check_and_deliver(&tasks[i]);
         }
     }
 
@@ -316,6 +328,14 @@ task_t* scheduler_get_current(void) {
     return current_task;
 }
 
+task_t* scheduler_find_pid(uint32_t pid) {
+    for (int i = 0; i < MAX_TASKS; i++) {
+        if (tasks[i].pid == pid && tasks[i].state != TASK_FINISHED)
+            return &tasks[i];
+    }
+    return NULL;
+}
+
 void scheduler_wake_ipc(void* obj, uint8_t wait_type) {
     for (int i = 1; i < MAX_TASKS; i++) {
         if (tasks[i].state == TASK_BLOCKED &&
@@ -442,6 +462,8 @@ int task_fork(uint32_t* regs) {
     child->stdout_pipe = -1;
     child->stdin_pipe = -1;
     child->is_forked = 1;
+    child->sig_pending = 0;
+    memset(child->sig_handlers, 0, sizeof(child->sig_handlers));
 
     /* Insert into circular linked list */
     child->next = current_task->next;

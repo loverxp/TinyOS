@@ -1,6 +1,8 @@
 #include "../include/keyboard.h"
 #include "../include/io.h"
 #include "../include/vga.h"
+#include "../include/signal.h"
+#include "../include/scheduler.h"
 
 // Keyboard ports
 #define KEYBOARD_DATA_PORT    0x60
@@ -99,6 +101,7 @@ static const char scancode_to_ascii_shift[] = {
 };
 
 static volatile int shift_pressed = 0;
+static volatile int ctrl_pressed = 0;
 
 // Simple debug output to serial port
 static void serial_write(char c) {
@@ -161,10 +164,23 @@ void keyboard_handler(void) {
         if (scancode == 0x2A || scancode == 0x36) {
             shift_pressed = 0;
         }
+        if (scancode == 0x1D) {
+            ctrl_pressed = 0;
+        }
     } else {
         // Key press
         if (scancode == 0x2A || scancode == 0x36) {
             shift_pressed = 1;
+        } else if (scancode == 0x1D) {
+            ctrl_pressed = 1;
+        } else if (ctrl_pressed && scancode == 0x2E) {
+            /* Ctrl+C: send SIGINT to all non-idle tasks */
+            serial_string("[KBD] Ctrl+C -> SIGINT all\n");
+            vga_writestring("^C\n");
+            for (uint32_t p = 1; p < 256; p++) {
+                signal_send(p, SIGINT);
+            }
+            need_reschedule = 1;
         } else if (scancode < sizeof(scancode_to_ascii)) {
             char c;
             if (shift_pressed) {

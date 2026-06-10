@@ -2,6 +2,7 @@
 #define SCHEDULER_H
 
 #include "types.h"
+#include "signal.h"
 
 #define TASK_NAME_MAX    16
 #define TASK_STACK_SIZE  4096
@@ -27,6 +28,8 @@ typedef struct task {
     int      stdout_pipe;     /* -1 = normal VGA output, else pipe_id for output */
     int      stdin_pipe;      /* -1 = normal keyboard input, else pipe_id for input */
     uint8_t  is_forked;       /* 1 = created by fork(), should call task_exit() on exit */
+    uint32_t sig_pending;     /* bitmask of pending signals */
+    signal_handler_t sig_handlers[16]; /* per-signal handlers */
     struct task* next;
 } task_t;
 
@@ -42,6 +45,7 @@ void task_exit(void);
 void task_yield(void);          /* Voluntarily give up CPU */
 void task_sleep(uint32_t ms);   /* Sleep for N milliseconds */
 task_t* scheduler_get_current(void);
+task_t* scheduler_find_pid(uint32_t pid);
 void scheduler_wake_ipc(void* obj, uint8_t wait_type);
 
 /* Fork the current task — clones kernel stack and TCB.

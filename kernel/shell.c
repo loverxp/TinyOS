@@ -11,6 +11,7 @@
 #include "../include/interrupts.h"
 #include "../include/io.h"
 #include "../include/scheduler.h"
+#include "../include/signal.h"
 #include "../include/ata.h"
 #include "../include/fat16.h"
 #include "../include/pci.h"
@@ -1166,19 +1167,35 @@ static void shell_handle_command(const char* cmd) {
     } else if (strncmp(cmd, "cat ", 4) == 0) {
         const char* fname = cmd + 4;
         while (*fname == ' ') fname++;
-        fat16_entry_t entry;
-        if (fat16_find(fname, &entry) == 0) {
-            /* Read file into a buffer and print */
-            static char cat_buf[4096];
-            uint32_t to_read = entry.file_size;
-            if (to_read > sizeof(cat_buf) - 1) to_read = sizeof(cat_buf) - 1;
-            uint32_t got = fat16_read(&entry, 0, cat_buf, to_read);
-            cat_buf[got] = '\0';
-            printf("%s", cat_buf);
-            if (got > 0 && cat_buf[got-1] != '\n') printf("\n");
-            printf("(%u bytes)\n", entry.file_size);
+        if (strncmp(fname, "/dev/", 5) == 0) {
+            int fd = vfs_open(fname, 0x00);
+            if (fd >= 0) {
+                static char cat_buf[4096];
+                int got = vfs_read(fd, cat_buf, sizeof(cat_buf) - 1);
+                if (got > 0) {
+                    cat_buf[got] = '\0';
+                    printf("%s", cat_buf);
+                    if (cat_buf[got-1] != '\n') printf("\n");
+                }
+                printf("(%d bytes)\n", got);
+                vfs_close(fd);
+            } else {
+                printf("File not found: %s\n", fname);
+            }
         } else {
-            printf("File not found: %s\n", fname);
+            fat16_entry_t entry;
+            if (fat16_find(fname, &entry) == 0) {
+                static char cat_buf[4096];
+                uint32_t to_read = entry.file_size;
+                if (to_read > sizeof(cat_buf) - 1) to_read = sizeof(cat_buf) - 1;
+                uint32_t got = fat16_read(&entry, 0, cat_buf, to_read);
+                cat_buf[got] = '\0';
+                printf("%s", cat_buf);
+                if (got > 0 && cat_buf[got-1] != '\n') printf("\n");
+                printf("(%u bytes)\n", entry.file_size);
+            } else {
+                printf("File not found: %s\n", fname);
+            }
         }
     } else if (strcmp(cmd, "diskinfo") == 0) {
         /* Run diskinfo as a user program */

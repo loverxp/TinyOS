@@ -118,6 +118,8 @@ qemu-system-i386.exe -kernel build/tinyos.bin -m 32
 - `drivers/ata.c`: ATA PIO 驱动（读/写扇区，CACHE FLUSH）
 - `kernel/mbr.c`: MBR 分区表解析（读取扇区 0，解析 4 个分区条目，识别 FAT16 分区，`partitions` Shell 命令）
 - `kernel/vfs.c`: VFS 虚拟文件系统层（多后端路由，fd 表 16 项，DevFS 后端 /dev/null + /dev/zero，open/read/write/close/stat/dup2，syscall 28-31/62）
+- `kernel/signal.c`: POSIX-like 信号系统（SIGHUP/SIGINT/SIGKILL/SIGTERM，signal_send/signal_check_and_deliver，Ctrl+C 广播 SIGINT）
+- `include/signal.h`: 信号常量定义（NSIG=16）、signal_handler_t、signal API 声明
 - `kernel/ipc.c`: 进程间通信（Pipe 管道、Message Queue 消息队列、Shared Memory 共享内存）
 - `include/ipc.h`: IPC API 定义（pipe_t、mqueue_t、shm_region_t、函数声明）
 
@@ -151,6 +153,7 @@ qemu-system-i386.exe -kernel build/tinyos.bin -m 32
 - **多任务调度器**: 抢占式 Round-Robin，IRQ0 每次 tick 设置 `need_reschedule=1`，`irq_common_stub` 在 EOI 后调用 `prepare_switch()` + `do_switch()` 完成上下文切换。idle 任务（主循环）作为循环链表节点参与轮换
 - **schedtest 命令**: `schedtest [N]` 创建两个测试线程交替打印 A/B，N 秒后自动退出（默认 10 秒，上限 300 秒）。任务通过 `task_exit()` 标记 FINISHED
 - **IPC 阻塞与唤醒**: `ipc_block()` 将当前任务设为 BLOCKED 并记录 `ipc_wait_obj`/`ipc_wait_type`，然后 halt 等待。数据到达后 `ipc_wake()` 调用 `scheduler_wake_ipc()` 遍历任务数组精确唤醒匹配等待者和等待类型的任务。IPC 阻塞的任务 `sleep_deadline=0`，不会被定时器唤醒逻辑误触
+- **信号系统**: POSIX-like 信号（SIGHUP=1, SIGINT=2, SIGKILL=9, SIGTERM=15），`task_t` 扩展 `sig_pending` 位掩码 + `sig_handlers[16]` 数组。Ctrl+C 广播 SIGINT 到所有非 idle 任务，`prepare_switch()` 遍历全任务数组投递信号，默认动作 TERMINATE 终止任务并从环形链表摘除。Syscall 33 = `kill(pid, sig)`
 - **gfxsnake**: 新版 VGA Mode 13h 像素模式贪吃蛇，作为用户程序在 Ring 3 运行，使用系统调用切换视频模式和读取输入
 - **用户命令迁移到 Ring 3**: echo/clear/help/hello/forktest/uptime/date/rand/meminfo/diskinfo 已作为独立 ELF 用户程序运行（嵌入内核二进制）。通过 `run_embedded_elf()` 通用加载器执行，参数通过 `user_cmd_args` 缓冲区 + syscall 23 (`get_cmdline`) 传递。系统信息命令通过 syscall 27 (`get_system_info`) 查询内核数据
 - **用户程序构建流程**: `user/build.bat` 编译 libc（stdio/string/stdlib）+ apps 源码 → i686-elf-ld 链接 → objcopy 转 ELF → kernel .asm 通过 `incbin` 嵌入
