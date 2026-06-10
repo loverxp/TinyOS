@@ -180,6 +180,14 @@ struct page_directory_entry {
   - `yield()` - 主动让出 CPU (syscall 8)
   - `sleep(ms)` - 睡眠等待 (syscall 9)，设置 `sleep_deadline`，调度器在 `prepare_switch()` 中自动唤醒
 
+- [x] **信号系统** ✅ 已实现
+  - POSIX-like 信号：SIGHUP(1), SIGINT(2), SIGKILL(9), SIGTERM(15)
+  - `signal_send(pid, sig)` 发送信号，`signal_check_and_deliver(task)` 投递
+  - Ctrl+C 广播 SIGINT 到所有非 idle 任务
+  - `prepare_switch()` 遍历全任务数组投递待处理信号
+  - 默认动作 TERMINATE 终止任务，支持 SIG_ACTION_IGN 忽略
+  - `kill(pid, sig)` 命令 (syscall 33)
+
 ### 2.2 进程间通信 (IPC) ✅ 已实现
 **目标**：进程间数据交换
 
@@ -291,8 +299,8 @@ struct page_directory_entry {
 **目标**：命令行解释器
 
 - [x] 命令解析
-- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `hello`, `forktest`, `filetest`, `ls [path]`, `cat <path>`, `mkdir <path>`, `rmdir <path>`, `write <path>`, `rm <path>`, `diskinfo`, `pci`, `partitions`, `net`, `ping <ip|hostname>`, `send <ip|hostname>`, `recv`, `arp`, `netstat`, `rand`, `dhcp`, `tcp-recv`, `http-get`, `ipctest`
-  - 已迁移到 Ring 3 用户态：`help`, `clear`, `echo`, `hello`, `uptime`, `date`, `rand`, `meminfo`, `diskinfo` (通过 syscall 27 get_system_info 查询系统信息)
+- [x] 内建命令：`help`, `clear`, `uptime`, `meminfo`, `alloc`, `free`, `except`, `kmtest`, `echo`, `testuser`, `runuser`, `hello`, `forktest`, `filetest`, `ls [path]`, `cat <path>`, `mkdir <path>`, `rmdir <path>`, `write <path>`, `rm <path>`, `diskinfo`, `pci`, `partitions`, `net`, `ping <ip|hostname>`, `send <ip|hostname>`, `recv`, `arp`, `netstat`, `rand`, `dhcp`, `tcp-recv`, `http-get`, `ipctest`, `schedtest`, `kill`, `webserver`, `dino`, `si`, `tinyhttpd`, `date`, `more`
+  - 已迁移到 Ring 3 用户态：`help`, `clear`, `echo`, `hello`, `uptime`, `date`, `rand`, `meminfo`, `diskinfo`, `ls`, `cat`, `more`, `write`, `rm`, `mkdir`, `rmdir`, `ping`, `arp`, `net`, `netstat`, `dhcp`, `pci`, `kill`, `filetest`, `dino`, `si`, `tinyhttpd` (共 28 个，通过 syscall 27 get_system_info 查询系统信息)
 - [x] 程序执行：`fork` (syscall 25) + `exec` (syscall 26)
 - [x] 管道支持：`cmd1 | cmd2`（基于 Pipe IPC + I/O 重定向）
   - Shell 解析 `|` 分隔的多条命令
@@ -314,9 +322,13 @@ struct page_directory_entry {
   - 支持 `%d`, `%u`, `%x`, `%s`, `%c`, `%p`
 - [x] **待扩展**
   - `malloc(size)` / `free(ptr)` - 堆分配器 ✅ 已实现
-  - `write(fd, buf, len)` - 文件 I/O
+  - `write(fd, buf, len)` - 文件 I/O ✅ 已实现（VFS syscall 30）
   - `scanf` - 格式化输入 ✅ 已实现
   - `getchar` / `readline` / `get_cmdline` / `clear_screen` 系统调用 ✅ 已实现
+- [x] **POSIX 兼容层**
+  - `errno` 全局变量 + 25+ 标准错误码（EPERM~ENOSYS）✅ 已实现
+  - `termios` 终端控制 stub（`tcgetattr`/`tcsetattr`/`cfmakeraw`）✅ 已实现
+  - `unistd.h` / `fcntl.h` POSIX 风格头文件 ✅ 已实现
 
 #### 近期修复记录
 - **`%u` 格式符缺失修复** (2025-06-06):

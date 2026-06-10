@@ -56,6 +56,24 @@ nasm -f elf32 kernel/embedded_date.asm -o build/embedded_date_asm.o
 nasm -f elf32 kernel/embedded_rand.asm -o build/embedded_rand_asm.o
 nasm -f elf32 kernel/embedded_meminfo.asm -o build/embedded_meminfo_asm.o
 nasm -f elf32 kernel/embedded_diskinfo.asm -o build/embedded_diskinfo_asm.o
+nasm -f elf32 kernel/embedded_ls.asm -o build/embedded_ls_asm.o
+nasm -f elf32 kernel/embedded_cat.asm -o build/embedded_cat_asm.o
+nasm -f elf32 kernel/embedded_more.asm -o build/embedded_more_asm.o
+nasm -f elf32 kernel/embedded_write.asm -o build/embedded_write_asm.o
+nasm -f elf32 kernel/embedded_rm.asm -o build/embedded_rm_asm.o
+nasm -f elf32 kernel/embedded_mkdir.asm -o build/embedded_mkdir_asm.o
+nasm -f elf32 kernel/embedded_rmdir.asm -o build/embedded_rmdir_asm.o
+nasm -f elf32 kernel/embedded_ping.asm -o build/embedded_ping_asm.o
+nasm -f elf32 kernel/embedded_arp.asm -o build/embedded_arp_asm.o
+nasm -f elf32 kernel/embedded_net_cmd.asm -o build/embedded_net_cmd_asm.o
+nasm -f elf32 kernel/embedded_netstat.asm -o build/embedded_netstat_asm.o
+nasm -f elf32 kernel/embedded_dhcp.asm -o build/embedded_dhcp_asm.o
+nasm -f elf32 kernel/embedded_pci.asm -o build/embedded_pci_asm.o
+nasm -f elf32 kernel/embedded_kill.asm -o build/embedded_kill_asm.o
+nasm -f elf32 kernel/embedded_filetest.asm -o build/embedded_filetest_asm.o
+nasm -f elf32 kernel/embedded_dino.asm -o build/embedded_dino_asm.o
+nasm -f elf32 kernel/embedded_si.asm -o build/embedded_si_asm.o
+nasm -f elf32 kernel/embedded_tinyhttpd.asm -o build/embedded_tinyhttpd_asm.o
 
 # 编译 C 文件
 i686-elf-gcc -m32 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nostdinc -fno-pic -fno-pie -Iinclude -c <file.c> -o <file.o>
@@ -70,8 +88,8 @@ qemu-system-i386.exe -kernel build/tinyos.bin -m 32
 
 ## 项目结构
 - `boot/`: 启动代码
-- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, paging.c, mm.c, except.c, loader.c, scheduler.c, ipc.c, fat16.c, net.c, wm.c, webserver.c, httpclient.c, mbr.c, vfs.c, embedded_user.asm, embedded_hello.asm, embedded_echo.asm, embedded_clear.asm, embedded_help.asm, embedded_forktest.asm, embedded_uptime.asm, embedded_date.asm, embedded_rand.asm, embedded_meminfo.asm, embedded_diskinfo.asm, user.asm, switch.asm）
-- `user/`: 用户程序与 libc（apps/echo.c, apps/clear.c, apps/help.c, apps/snake.c, apps/uptime.c, apps/date.c, apps/rand.c, apps/meminfo.c, apps/diskinfo.c, libc/stdio.c, libc/string.c, libc/stdlib.c, libc/syscall.h, crt0.s, user.ld, build.bat）
+- `kernel/`: 内核主程序（kernel.c, shell.c, gdt.c, tss.c, pmm.c, paging.c, mm.c, except.c, loader.c, scheduler.c, ipc.c, fat16.c, net.c, wm.c, webserver.c, httpclient.c, mbr.c, vfs.c, signal.c, embedded_user.asm, embedded_hello.asm, embedded_echo.asm, embedded_clear.asm, embedded_help.asm, embedded_forktest.asm, embedded_uptime.asm, embedded_date.asm, embedded_rand.asm, embedded_meminfo.asm, embedded_diskinfo.asm, embedded_ls.asm, embedded_cat.asm, embedded_more.asm, embedded_write.asm, embedded_rm.asm, embedded_mkdir.asm, embedded_rmdir.asm, embedded_ping.asm, embedded_arp.asm, embedded_net_cmd.asm, embedded_netstat.asm, embedded_dhcp.asm, embedded_pci.asm, embedded_kill.asm, embedded_filetest.asm, embedded_dino.asm, embedded_si.asm, embedded_tinyhttpd.asm, user.asm, switch.asm）
+- `user/`: 用户程序与 libc（apps/echo.c, apps/clear.c, apps/help.c, apps/snake.c, apps/uptime.c, apps/date.c, apps/rand.c, apps/meminfo.c, apps/diskinfo.c, apps/ls.c, apps/cat.c, apps/more.c, apps/write.c, apps/rm.c, apps/mkdir.c, apps/rmdir.c, apps/ping.c, apps/arp.c, apps/net.c, apps/netstat.c, apps/dhcp.c, apps/pci.c, apps/kill.c, apps/filetest.c, apps/dino.c, apps/si.c, apps/tinyhttpd.c, apps/forktest.c, libc/stdio.c, libc/string.c, libc/stdlib.c, libc/errno.c, libc/termios.c, libc/syscall.h, crt0.s, user.ld, build.bat）
 - `drivers/`: 设备驱动（VGA、键盘、定时器、中断、GDT、串口、I/O、ATA、PCI、NE2000、VBE、帧缓冲、鼠标、内建字模、RTC）
 - `lib/`: 库函数（字符串处理、printf/sprintf 格式化输出、PRNG、调试框架）
 - `include/`: 头文件
@@ -84,13 +102,13 @@ qemu-system-i386.exe -kernel build/tinyos.bin -m 32
 - `drivers/gdt.asm` / `kernel/gdt.c`: GDT 定义与初始化
 - `kernel/tss.c`: TSS 初始化，管理 Ring 3→Ring 0 栈切换
 - `kernel/user.asm`: 用户态入口、Ring 3 切换及退出（含自定义栈版本 `run_user_task_ex`）
-- `kernel/loader.c`: 用户程序加载器，ELF 加载、Ring 3 执行（含通用 `run_embedded_elf`、`run_echo_user`、`run_clear_user`、`run_help_user`、`run_uptime_user`、`run_date_user`、`run_rand_user`、`run_meminfo_user`、`run_diskinfo_user`）
+- `kernel/loader.c`: 用户程序加载器，ELF 加载、Ring 3 执行（含通用 `run_embedded_elf`、`run_echo_user`、`run_clear_user`、`run_help_user`、`run_uptime_user`、`run_date_user`、`run_rand_user`、`run_meminfo_user`、`run_diskinfo_user`、`run_ls_user`、`run_cat_user`、`run_more_user`、`run_write_user`、`run_rm_user`、`run_mkdir_user`、`run_rmdir_user`、`run_ping_user`、`run_arp_user`、`run_net_user`、`run_netstat_user`、`run_dhcp_user`、`run_pci_user`、`run_kill_user`、`run_filetest_user`、`run_dino_user`、`run_si_user`、`run_tinyhttpd_user`）
 - `kernel/embedded_user.asm`: 使用 `incbin` 嵌入 gfxsnake 用户程序二进制
-- `kernel/embedded_hello.asm` / `kernel/embedded_echo.asm` / `kernel/embedded_clear.asm` / `kernel/embedded_help.asm` / `kernel/embedded_forktest.asm` / `kernel/embedded_uptime.asm` / `kernel/embedded_date.asm` / `kernel/embedded_rand.asm` / `kernel/embedded_meminfo.asm` / `kernel/embedded_diskinfo.asm`: 使用 `incbin` 嵌入对应用户程序 ELF
-- `include/loader.h`: 加载器 API 声明（run_loaded_user, run_hello_user, run_echo_user, run_clear_user, run_help_user, run_uptime_user, run_date_user, run_rand_user, run_meminfo_user, run_diskinfo_user）
+- `kernel/embedded_hello.asm` / `kernel/embedded_echo.asm` / `kernel/embedded_clear.asm` / `kernel/embedded_help.asm` / `kernel/embedded_forktest.asm` / `kernel/embedded_uptime.asm` / `kernel/embedded_date.asm` / `kernel/embedded_rand.asm` / `kernel/embedded_meminfo.asm` / `kernel/embedded_diskinfo.asm` / `kernel/embedded_ls.asm` / `kernel/embedded_cat.asm` / `kernel/embedded_more.asm` / `kernel/embedded_write.asm` / `kernel/embedded_rm.asm` / `kernel/embedded_mkdir.asm` / `kernel/embedded_rmdir.asm` / `kernel/embedded_ping.asm` / `kernel/embedded_arp.asm` / `kernel/embedded_net_cmd.asm` / `kernel/embedded_netstat.asm` / `kernel/embedded_dhcp.asm` / `kernel/embedded_pci.asm` / `kernel/embedded_kill.asm` / `kernel/embedded_filetest.asm` / `kernel/embedded_dino.asm` / `kernel/embedded_si.asm` / `kernel/embedded_tinyhttpd.asm`: 使用 `incbin` 嵌入对应用户程序 ELF（共 28 个 + embedded_user.asm 嵌入 gfxsnake）
+- `include/loader.h`: 加载器 API 声明（run_loaded_user, run_hello_user, run_echo_user, run_clear_user, run_help_user, run_uptime_user, run_date_user, run_rand_user, run_meminfo_user, run_diskinfo_user, run_ls_user, run_cat_user, run_more_user, run_write_user, run_rm_user, run_mkdir_user, run_rmdir_user, run_ping_user, run_arp_user, run_net_user, run_netstat_user, run_dhcp_user, run_pci_user, run_kill_user, run_filetest_user, run_dino_user, run_si_user, run_tinyhttpd_user）
 - `user/libc/`: 用户态 libc（stdio.c, string.c, stdlib.c, errno.c, termios.c, syscall.h），通过 int 0x80 系统调用与内核交互
 - `user/include/`: 用户态头文件（errno.h, termios.h, unistd.h, fcntl.h, stdint.h, stddef.h, stdarg.h, stdio.h, stdlib.h, string.h, syscall.h）— POSIX 兼容层
-- `user/apps/`: 用户程序源码（echo.c, clear.c, help.c, snake.c/gfxsnake.c, uptime.c, date.c, rand.c, meminfo.c, diskinfo.c）
+- `user/apps/`: 用户程序源码（echo.c, clear.c, help.c, snake.c/gfxsnake.c, uptime.c, date.c, rand.c, meminfo.c, diskinfo.c, ls.c, cat.c, more.c, write.c, rm.c, mkdir.c, rmdir.c, ping.c, arp.c, net.c, netstat.c, dhcp.c, pci.c, kill.c, filetest.c, dino.c, si.c, tinyhttpd.c, forktest.c）
 - `user/crt0.s`: 用户程序启动代码（清 BSS → call main → syscall 0 退出）
 - `user/user.ld`: 用户程序链接脚本（加载地址 0x400000）
 - `user/build.bat`: 用户程序编译脚本（编译 libc + 各 app → 链接 ELF → objcopy 转二进制）
@@ -155,7 +173,7 @@ qemu-system-i386.exe -kernel build/tinyos.bin -m 32
 - **IPC 阻塞与唤醒**: `ipc_block()` 将当前任务设为 BLOCKED 并记录 `ipc_wait_obj`/`ipc_wait_type`，然后 halt 等待。数据到达后 `ipc_wake()` 调用 `scheduler_wake_ipc()` 遍历任务数组精确唤醒匹配等待者和等待类型的任务。IPC 阻塞的任务 `sleep_deadline=0`，不会被定时器唤醒逻辑误触
 - **信号系统**: POSIX-like 信号（SIGHUP=1, SIGINT=2, SIGKILL=9, SIGTERM=15），`task_t` 扩展 `sig_pending` 位掩码 + `sig_handlers[16]` 数组。Ctrl+C 广播 SIGINT 到所有非 idle 任务，`prepare_switch()` 遍历全任务数组投递信号，默认动作 TERMINATE 终止任务并从环形链表摘除。Syscall 33 = `kill(pid, sig)`
 - **gfxsnake**: 新版 VGA Mode 13h 像素模式贪吃蛇，作为用户程序在 Ring 3 运行，使用系统调用切换视频模式和读取输入
-- **用户命令迁移到 Ring 3**: echo/clear/help/hello/forktest/uptime/date/rand/meminfo/diskinfo 已作为独立 ELF 用户程序运行（嵌入内核二进制）。通过 `run_embedded_elf()` 通用加载器执行，参数通过 `user_cmd_args` 缓冲区 + syscall 23 (`get_cmdline`) 传递。系统信息命令通过 syscall 27 (`get_system_info`) 查询内核数据
+- **用户命令迁移到 Ring 3**: echo/clear/help/hello/forktest/uptime/date/rand/meminfo/diskinfo/ls/cat/more/write/rm/mkdir/rmdir/ping/arp/net/netstat/dhcp/pci/kill/filetest/dino/si/tinyhttpd 共 28 个已作为独立 ELF 用户程序运行（嵌入内核二进制）。通过 `run_embedded_elf()` 通用加载器执行，参数通过 `user_cmd_args` 缓冲区 + syscall 23 (`get_cmdline`) 传递。系统信息命令通过 syscall 27 (`get_system_info`) 查询内核数据。文件系统类和网络类用户程序需 FAT16 VFS 后端才能完整工作，当前仍由内核 Shell 处理实际 FAT16 操作
 - **用户程序构建流程**: `user/build.bat` 编译 libc（stdio/string/stdlib）+ apps 源码 → i686-elf-ld 链接 → objcopy 转 ELF → kernel .asm 通过 `incbin` 嵌入
 - **VGA 字模恢复机制**: Mode 13h (chain-4) 写入 `0xA0000` 时会破坏 VGA plane 2 的字体数据。内核在开机时调用 `vga_save_font()` 保存 4096 字节字模到缓冲区，切换回文本模式时由 `vga_set_mode03h()` 调用 `vga_restore_font()` 恢复
 - **VGA Mode 13h 初始化顺序**: Misc Output → Sequencer (复位→编程→释放) → Graphics Controller → CRTC (解锁→编程→上锁) → Attribute Controller (编程→重新使能) → DAC 调色板。顺序错误会导致黑屏或花屏
